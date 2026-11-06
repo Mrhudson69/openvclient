@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest a feature, connector or improvement
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Connector requests: please check ROADMAP.md first - many are already planned.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of request
+      options:
+        - New connector
+        - Improvement to an existing connector
+        - SQL editor / grid / UI
+        - Network / security
+        - Packaging / platform support
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work? Mock-ups, screenshots from other tools and example SQL/commands are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: versions
+    attributes:
+      label: Server / service versions involved
+      placeholder: e.g. Oracle 23ai, Kafka 3.8
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to work on a pull request for this (see CONTRIBUTING.md).

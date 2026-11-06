@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/openvclient-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Mrhudson69/openvclient"
+rust-version = "1.95"
+
+[workspace.dependencies]
+openvclient-core = { path = "crates/openvclient-core" }
+openvclient-sqlite = { path = "crates/openvclient-sqlite" }
+openvclient-postgres = { path = "crates/openvclient-postgres" }
+openvclient-mysql = { path = "crates/openvclient-mysql" }
+openvclient-redis = { path = "crates/openvclient-redis" }
+openvclient-docker = { path = "crates/openvclient-docker" }
+openvclient-net = { path = "crates/openvclient-net" }
+openvclient-sqlserver = { path = "crates/openvclient-sqlserver" }
+openvclient-mongo = { path = "crates/openvclient-mongo" }
+openvclient-http = { path = "crates/openvclient-http" }
+openvclient-storage = { path = "crates/openvclient-storage" }
+
+anyhow = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+futures = "0.3"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "fs", "io-util"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "http2", "charset", "query", "form"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2

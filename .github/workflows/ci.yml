@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  # eframe/winit (X11 + Wayland), native-tls (OpenSSL). rfd uses the XDG portal
+  # and keyring uses pure-Rust zbus, so no GTK or libdbus headers are needed.
+  LINUX_DEPS: >-
+    pkg-config libssl-dev libxkbcommon-dev libwayland-dev
+    libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libx11-dev libgl1-mesa-dev
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    # The tree is not rustfmt-clean yet. Remove this line once `cargo fmt --all`
+    # has been run (and a rustfmt.toml agreed on) so formatting becomes blocking.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_DEPS
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Minimal feature build (SQLite only)
+        run: cargo check -p openvclient-app --no-default-features --features sqlite
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --workspace --all-targets
+      # Live connector tests find no servers here and skip themselves.
+      - name: Test
+        run: cargo test --workspace -- --nocapture
+
+  test-linux-live:
+    name: test (ubuntu-latest, live services)
+    runs-on: ubuntu-latest
+    # Host ports match the defaults in each connector's live test.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["56379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "OpenVClient#2026"
+        ports: ["51433:1433"]
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'OpenVClient#2026' -Q 'SELECT 1' -b"
+          --health-interval 10s --health-timeout 10s --health-retries 30 --health-start-period 20s
+      mongo:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: ovcpass
+        ports: ["57017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping: 1})'"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_USER: ovc
+          CLICKHOUSE_PASSWORD: ovcpass
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports: ["58123:8123"]
+        options: >-
+          --ulimit nofile=262144:262144
+          --health-cmd "clickhouse-client --user ovc --password ovcpass -q 'SELECT 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      elasticsearch:
+        image: elasticsearch:8.15.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports: ["59200:9200"]
+        options: >-
+          --health-cmd "curl -fs http://localhost:9200/_cluster/health"
+          --health-interval 10s --health-timeout 5s --health-retries 30
+      rabbitmq:
+        image: rabbitmq:3-management
+        env:
+          RABBITMQ_DEFAULT_USER: ovc
+          RABBITMQ_DEFAULT_PASS: ovcpass
+        ports: ["55673:15672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s --health-timeout 10s --health-retries 30
+    env:
+      OPENVCLIENT_PG_HOST: localhost
+      OPENVCLIENT_PG_USER: postgres
+      OPENVCLIENT_PG_PASSWORD: postgres
+      OPENVCLIENT_MY_HOST: 127.0.0.1
+      OPENVCLIENT_MY_USER: root
+      OPENVCLIENT_MY_PASSWORD: root
+      OPENVCLIENT_REDIS_PORT: "56379"
+      OPENVCLIENT_MS_PORT: "51433"
+      OPENVCLIENT_MS_PASSWORD: "OpenVClient#2026"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies and DB client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $LINUX_DEPS postgresql-client mysql-client
+      # Services that need a custom command, or that the Docker test drives.
+      - name: Start extra test containers
+        run: |
+          docker run -d --name ovc-minio -p 59000:9000 \
+            -e MINIO_ROOT_USER=ovcadmin -e MINIO_ROOT_PASSWORD=ovcpass123 \
+            minio/minio server /data
+          # live_docker exercises the container named openvclient-test-redis.
+          docker run -d --name openvclient-test-redis redis:7-alpine
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --workspace --all-targets
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            curl -fs http://127.0.0.1:59000/minio/health/live && exit 0
+            sleep 2
+          done
+          echo "MinIO did not become ready; S3 test will skip"
+      # Network-path tests (SSH/SOCKS5/HTTP proxy on 52222/51080/53128) skip
+      # here until their proxy containers are added (see docs/RELEASE_PLAN.md).
+      - name: Test (live connectors)
+        run: |
+          set -o pipefail
+          cargo test --workspace -- --nocapture 2>&1 | tee test.log
+      - name: Show skipped live tests
+        if: always()
+        run: grep -i "skipping" test.log || echo "no live test skipped"

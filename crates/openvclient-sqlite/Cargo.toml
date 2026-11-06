@@ -1,0 +1,16 @@
+[package]
+name = "openvclient-sqlite"
+description = "SQLite connector for OpenVClient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+openvclient-core.workspace = true
+async-trait.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+rusqlite = { version = "0.41", features = ["bundled", "backup", "column_decltype", "hooks"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

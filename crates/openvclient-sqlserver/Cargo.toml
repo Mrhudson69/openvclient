@@ -1,0 +1,31 @@
+[package]
+name = "openvclient-sqlserver"
+description = "Microsoft SQL Server connector for OpenVClient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+openvclient-core.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tracing.workspace = true
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono", "rust_decimal"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+chrono.workspace = true
+reqwest.workspace = true
+openvclient-net.workspace = true
+serde_json.workspace = true
+
+# Windows authentication (NTLM user/password and integrated SSPI) uses the
+# native Windows SSPI, so it is enabled in Windows builds only.
+[target.'cfg(unix)'.dependencies]
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono", "rust_decimal", "sql-browser-tokio"] }
+
+[target.'cfg(windows)'.dependencies]
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono", "rust_decimal", "winauth", "sql-browser-tokio"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

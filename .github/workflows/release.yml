@@ -1,0 +1,249 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  version:
+    name: Check tag matches Cargo version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - id: v
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "Cargo version: $version, tag: $TAG"
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match workspace version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  macos:
+    name: macOS universal
+    needs: version
+    runs-on: macos-14
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build both architectures
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          cargo build --release --locked -p openvclient-app --target aarch64-apple-darwin
+          cargo build --release --locked -p openvclient-app --target x86_64-apple-darwin
+      - name: Bundle universal .app
+        run: |
+          APP=dist/OpenVClient.app
+          rm -rf dist && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          lipo -create -output "$APP/Contents/MacOS/OpenVClient" \
+            target/aarch64-apple-darwin/release/openvclient \
+            target/x86_64-apple-darwin/release/openvclient
+          lipo -archs "$APP/Contents/MacOS/OpenVClient"
+          [ -f assets/OpenVClient.icns ] && cp assets/OpenVClient.icns "$APP/Contents/Resources/"
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>OpenVClient</string>
+            <key>CFBundleDisplayName</key><string>OpenVClient</string>
+            <key>CFBundleIdentifier</key><string>dev.openvclient.client</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleExecutable</key><string>OpenVClient</string>
+            <key>CFBundleIconFile</key><string>OpenVClient</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$APP/Contents/Info.plist"
+      - name: Import signing certificate
+        if: env.MACOS_CERTIFICATE != ''
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/build.keychain-db
+          KC_PASS=$(openssl rand -hex 16)
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+      - name: Sign .app (Developer ID, hardened runtime)
+        if: env.MACOS_CERTIFICATE != ''
+        run: codesign --force --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" dist/OpenVClient.app
+      - name: Ad-hoc sign .app (no certificate configured)
+        if: env.MACOS_CERTIFICATE == ''
+        run: codesign --force --deep --sign - dist/OpenVClient.app
+      - name: Verify signature
+        run: codesign --verify --deep --strict --verbose=2 dist/OpenVClient.app
+      - name: Build .dmg and .zip
+        run: |
+          mkdir -p dist/dmg out
+          cp -R dist/OpenVClient.app dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "OpenVClient" -srcfolder dist/dmg -ov -format UDZO \
+            "out/OpenVClient-${VERSION}-macos-universal.dmg"
+          ditto -c -k --keepParent dist/OpenVClient.app "out/OpenVClient-${VERSION}-macos-universal.zip"
+      - name: Sign and notarise .dmg
+        if: env.MACOS_CERTIFICATE != '' && env.APPLE_ID != ''
+        run: |
+          DMG="out/OpenVClient-${VERSION}-macos-universal.dmg"
+          codesign --force --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$DMG"
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "$DMG"
+          # Re-zip the .app after stapling the bundle too.
+          xcrun stapler staple dist/OpenVClient.app || true
+          rm "out/OpenVClient-${VERSION}-macos-universal.zip"
+          ditto -c -k --keepParent dist/OpenVClient.app "out/OpenVClient-${VERSION}-macos-universal.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: out/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    needs: version
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-pc-windows-msvc
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      # Builds, Authenticode-signs when WINDOWS_CERTIFICATE is set, and zips.
+      - name: Build and package
+        shell: pwsh
+        run: .\scripts\bundle-windows.ps1 -Target ${{ matrix.target }}
+      - name: Show signature status
+        shell: pwsh
+        run: Get-AuthenticodeSignature target\${{ matrix.target }}\release\openvclient.exe | Format-List Status, SignerCertificate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: version
+    # Oldest supported runner = glibc baseline for the binary.
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libxkbcommon-dev \
+            libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libx11-dev libgl1-mesa-dev file
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and package (tar.gz + .deb)
+        env:
+          TARGET: ${{ matrix.target }}
+        run: ./scripts/bundle-linux.sh
+      - name: Inspect .deb
+        run: dpkg-deb --info dist/*.deb && dpkg-deb --contents dist/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    name: Draft GitHub Release
+    needs: [version, macos, windows, linux]
+    runs-on: ubuntu-latest
+    env:
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          sha256sum * | tee SHA256SUMS
+      - name: Sign checksums (GPG)
+        if: env.GPG_PRIVATE_KEY != ''
+        working-directory: artifacts
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+            --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          prerelease=""
+          case "$TAG" in v0.*|*-*) prerelease="--prerelease" ;; esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* --draft $prerelease \
+              --title "OpenVClient $TAG" \
+              --notes "Draft release for $TAG. Verify with: sha256sum -c SHA256SUMS. Replace these notes with the CHANGELOG entry before publishing."
+          fi

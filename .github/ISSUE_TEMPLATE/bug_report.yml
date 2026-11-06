@@ -1,0 +1,99 @@
+name: Bug report
+description: Something in OpenVClient doesn't work as expected
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Security issues must not be filed here** - see SECURITY.md (Security tab -> Report a vulnerability).
+        Please remove passwords, tokens and private host names from anything you paste.
+  - type: input
+    id: version
+    attributes:
+      label: OpenVClient version
+      description: From the first line of the log (`OpenVClient X.Y.Z starting on ...`) or the release you downloaded. For source builds, the commit hash.
+      placeholder: 0.1.0 / abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Windows x86_64
+        - Windows ARM64
+        - Linux x86_64 (X11)
+        - Linux x86_64 (Wayland)
+        - Linux aarch64
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version / distribution
+      placeholder: macOS 15.1, Windows 11 24H2, Ubuntu 24.04 ...
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Connection / connection form
+        - Keychain / saved passwords
+        - Network path (SSH tunnel, SOCKS5, HTTP proxy)
+        - SQL editor / results
+        - Table grid / editing / export / import
+        - Explain / plan diagram
+        - Monitor / users / backup
+        - Command palette / shortcuts
+        - Theme / layout / accessibility
+        - Packaging / install
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: connector
+    attributes:
+      label: Connector and server version
+      description: e.g. PostgreSQL 16.4, SQL Server 2022 (entra_interactive), Redis 7.2, Docker 27
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a ... connection with ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include the error toast text (use its copy button) and screenshots if helpful.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: "From `<config dir>/logs/openvclient.log` (Settings -> Open logs folder). Logs never contain secrets, but check for host names you'd rather not share."
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I removed secrets and private details from this report.
+          required: true

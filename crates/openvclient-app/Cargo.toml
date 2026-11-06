@@ -1,0 +1,61 @@
+[package]
+name = "openvclient-app"
+description = "OpenVClient — universal database and infrastructure manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "openvclient"
+path = "src/main.rs"
+
+[features]
+default = ["sqlite", "postgres", "mysql", "redis", "docker", "sqlserver", "mongodb", "http", "storage"]
+sqlite = ["dep:openvclient-sqlite"]
+postgres = ["dep:openvclient-postgres"]
+mysql = ["dep:openvclient-mysql"]
+redis = ["dep:openvclient-redis"]
+docker = ["dep:openvclient-docker"]
+sqlserver = ["dep:openvclient-sqlserver"]
+mongodb = ["dep:openvclient-mongo"]
+http = ["dep:openvclient-http"]
+storage = ["dep:openvclient-storage"]
+
+[dependencies]
+openvclient-core.workspace = true
+openvclient-net.workspace = true
+openvclient-sqlite = { workspace = true, optional = true }
+openvclient-postgres = { workspace = true, optional = true }
+openvclient-mysql = { workspace = true, optional = true }
+openvclient-redis = { workspace = true, optional = true }
+openvclient-docker = { workspace = true, optional = true }
+openvclient-sqlserver = { workspace = true, optional = true }
+openvclient-mongo = { workspace = true, optional = true }
+openvclient-http = { workspace = true, optional = true }
+openvclient-storage = { workspace = true, optional = true }
+vt100 = "0.16"
+
+anyhow.workspace = true
+chrono.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "persistence", "wayland", "x11", "accesskit"] }
+egui = "0.37"
+egui_extras = "0.37"
+egui_tiles = "0.18"
+egui_material_icons = "0.9"
+keyring = "4"
+rfd = "0.17"
+directories = "6"
+reqwest.workspace = true
+csv = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot", "eframe"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

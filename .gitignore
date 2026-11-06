@@ -1,0 +1,50 @@
+# Build output
+/target/
+**/target/
+/dist/
+*.pdb
+**/*.rs.bk
+
+# Packaging artefacts
+*.dmg
+*.msi
+*.AppImage
+*.deb
+*.rpm
+/pkg/
+
+# Local data, never commit
+/demo/
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+workspace.json
+/logs/
+*.log
+
+# UI snapshot test diffs
+/crates/*/tests/snapshots/*.diff.png
+/crates/*/tests/snapshots/*.new.png
+
+# Local tooling
+/.rea/
+.claude/settings.local.json
+.claude/skills/
+graphify-out/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

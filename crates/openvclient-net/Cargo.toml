@@ -1,0 +1,19 @@
+[package]
+name = "openvclient-net"
+description = "Network paths for OpenVClient: SSH tunnels, SOCKS5 and HTTP CONNECT proxies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+openvclient-core.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "rt", "sync", "time", "macros", "process"] }
+tracing.workspace = true
+russh = "=0.62.7"
+tokio-socks = "0.5"
+base64 = "0.23"
+reqwest.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

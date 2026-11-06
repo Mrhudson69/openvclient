@@ -1,0 +1,18 @@
+[package]
+name = "openvclient-mysql"
+description = "MySQL / MariaDB connector for OpenVClient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+openvclient-core.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+mysql_async = { version = "0.37", default-features = false, features = ["minimal", "native-tls-tls"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
