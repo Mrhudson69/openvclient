@@ -23,6 +23,9 @@ pub fn grid<T>(ui: &mut Ui, items: &[T], w: f32, h: f32, mut body: impl FnMut(&m
                 card_frame(ui, rect, &resp);
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(14.0, 10.0))).layout(egui::Layout::top_down(egui::Align::Min)));
                 child.spacing_mut().item_spacing = egui::vec2(theme::space::SM, 4.0);
+                // Labels inside a clickable card must not grab the pointer
+                // (text cursor, swallowed clicks): the whole card is the button.
+                child.style_mut().interaction.selectable_labels = false;
                 body(&mut child, item, &resp);
             }
         });

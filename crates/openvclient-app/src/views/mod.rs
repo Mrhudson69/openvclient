@@ -1,6 +1,7 @@
 pub mod conn_dialog;
 pub mod dialogs;
 pub mod docker;
+pub mod files;
 pub mod home;
 pub mod monitor;
 pub mod object;

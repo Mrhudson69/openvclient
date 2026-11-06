@@ -774,7 +774,12 @@ fn resource_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, parent: Optio
         });
     }
     let s = cx.conns.session(id).and_then(|h| h.resource()).cloned();
+    // Storage: the sidebar shows folders; files are browsed in the file manager.
+    let folders_only = s.as_ref().is_some_and(|s| s.file_browser());
     for n in nodes {
+        if folders_only && !n.expandable && n.kind != "terminal" {
+            continue;
+        }
         let nk = format!("res|{}", n.id);
         let expanded = n.expandable && cx.sidebar.is_expanded(id, &nk);
         if !filter.is_empty() && !expanded && !n.expandable && !n.label.to_lowercase().contains(filter) {

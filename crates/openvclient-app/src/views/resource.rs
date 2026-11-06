@@ -352,9 +352,9 @@ impl ResourceTab {
                             }
                         }
                         FieldKind::Choice(opts) => {
-                            egui::ComboBox::from_id_salt(fs.key).selected_text(v.clone()).show_ui(ui, |ui| {
+                            egui::ComboBox::from_id_salt(fs.key).selected_text(openvclient_core::choice_label(fs.key, v)).show_ui(ui, |ui| {
                                 for o in *opts {
-                                    ui.selectable_value(v, o.to_string(), *o);
+                                    ui.selectable_value(v, o.to_string(), openvclient_core::choice_label(fs.key, o));
                                 }
                             });
                         }

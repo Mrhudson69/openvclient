@@ -92,12 +92,33 @@ impl ConnectionProfile {
         if let Some(path) = p("path") {
             return path.clone();
         }
+        // Connections without a host (cloud storage): show what identifies them.
+        if p("host").is_none() {
+            let scoped = |base: String, sub: Option<&String>| match sub {
+                Some(x) => format!("{base} / {x}"),
+                None => base,
+            };
+            if p("auth").map(String::as_str) == Some("azurite") {
+                return "Azurite emulator".into();
+            }
+            if let Some(a) = p("account") {
+                return scoped(a.clone(), p("container"));
+            }
+            if let Some(e) = p("endpoint") {
+                let host = e.split("://").nth(1).unwrap_or(e).split('/').next().unwrap_or(e).to_string();
+                return scoped(host, p("bucket"));
+            }
+            if self.driver == "docker" {
+                return "local Docker".into();
+            }
+            return p("container").or(p("bucket")).cloned().unwrap_or_default();
+        }
         let mut s = String::new();
         if let Some(u) = p("user") {
             s.push_str(u);
             s.push('@');
         }
-        s.push_str(p("host").map(String::as_str).unwrap_or("localhost"));
+        s.push_str(p("host").map(String::as_str).unwrap_or_default());
         if let Some(port) = p("port") {
             s.push(':');
             s.push_str(port);
@@ -157,5 +178,29 @@ impl ConnectParams {
             None => Ok(default),
             Some(p) => p.trim().parse().map_err(|_| crate::Error::invalid(format!("Invalid port: {p}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    fn prof(driver: &str, kv: &[(&str, &str)]) -> ConnectionProfile {
+        let mut p = ConnectionProfile::new(driver, "x");
+        for (k, v) in kv {
+            p.params.insert((*k).into(), (*v).into());
+        }
+        p
+    }
+
+    #[test]
+    fn no_localhost_for_cloud_storage() {
+        assert_eq!(prof("azure_blob", &[("auth", "account_key"), ("account", "acmeprod")]).summary(), "acmeprod");
+        assert_eq!(prof("azure_blob", &[("account", "acct"), ("container", "logs")]).summary(), "acct / logs");
+        assert_eq!(prof("azure_blob", &[("auth", "connection_string")]).summary(), "");
+        assert_eq!(prof("azure_blob", &[("auth", "azurite")]).summary(), "Azurite emulator");
+        assert_eq!(prof("s3", &[("endpoint", "https://s3.us-west-004.backblazeb2.com"), ("bucket", "b")]).summary(), "s3.us-west-004.backblazeb2.com / b");
+        assert_eq!(prof("docker", &[]).summary(), "local Docker");
+        assert_eq!(prof("postgres", &[("host", "db"), ("user", "u"), ("port", "5432")]).summary(), "u@db:5432");
     }
 }

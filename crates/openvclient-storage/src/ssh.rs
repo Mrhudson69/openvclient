@@ -193,6 +193,31 @@ fn sftp_err(e: russh_sftp::client::error::Error) -> Error {
     if m.to_lowercase().contains("permission") { Error::server(format!("Permission denied: {m}")) } else { Error::server(m) }
 }
 
+/// Breadcrumbs for absolute paths: "/", "/a", "/a/b" (folders only).
+fn path_crumbs(node: &str, home: &str) -> Vec<(String, String)> {
+    let (is_file, path) = match node.split_once(':') {
+        Some(("f", p)) => (true, p),
+        Some((_, p)) => (false, p),
+        None => return Vec::new(),
+    };
+    let dir = if is_file { parent(path) } else { path.to_string() };
+    let mut out = vec![("d:/".to_string(), "/".to_string())];
+    let mut acc = String::new();
+    for s in dir.split('/').filter(|s| !s.is_empty()) {
+        acc.push('/');
+        acc.push_str(s);
+        out.push((format!("d:{acc}"), s.to_string()));
+    }
+    // Start the trail at the home folder when the path is inside it.
+    if let Some(i) = out.iter().position(|(id, _)| id == &format!("d:{home}"))
+        && i > 0
+    {
+        out.drain(..i);
+        out[0].1 = format!("{} (home)", out[0].1);
+    }
+    out
+}
+
 fn join(dir: &str, name: &str) -> String {
     if dir.ends_with('/') { format!("{dir}{name}") } else { format!("{dir}/{name}") }
 }
@@ -253,6 +278,49 @@ impl ServiceSession for SshSession {
 
 #[async_trait]
 impl ResourceSession for SshSession {
+    fn file_browser(&self) -> bool {
+        self.sftp.is_some()
+    }
+
+    async fn list_dir(&self, node: Option<&str>, filter: &str) -> Result<FileListing> {
+        let dir = match node {
+            None => self.home.clone(),
+            Some(id) => id.strip_prefix("d:").ok_or_else(|| Error::invalid("Not a folder"))?.to_string(),
+        };
+        let f = filter.trim().to_lowercase();
+        let entries = self
+            .ls(&dir)
+            .await?
+            .into_iter()
+            .filter(|e| f.is_empty() || e.0.to_lowercase().contains(&f))
+            .map(|(name, is_dir, size, m)| {
+                let path = join(&dir, &name);
+                FileEntry {
+                    id: format!("{}:{path}", if is_dir { "d" } else { "f" }),
+                    name,
+                    is_dir,
+                    size: (!is_dir).then_some(size),
+                    modified: m.map(chrono::DateTime::<chrono::Utc>::from),
+                    detail: None,
+                    kind: if is_dir { "dir" } else { "file" }.into(),
+                }
+            })
+            .collect();
+        Ok(FileListing { entries, truncated: false })
+    }
+
+    fn breadcrumbs(&self, node: &str) -> Vec<(String, String)> {
+        path_crumbs(node, &self.home)
+    }
+
+    fn root_dir(&self) -> Option<String> {
+        Some(format!("d:{}", self.home))
+    }
+
+    fn file_actions(&self) -> FileActions {
+        FileActions { upload: Some("upload"), mkdir: Some("mkdir"), download: Some("download"), delete_file: Some("rm"), delete_dir: Some("rmdir"), rename: Some("rename"), share: None }
+    }
+
     async fn children(&self, parent_id: Option<&str>) -> Result<Vec<Node>> {
         let Some(id) = parent_id else {
             let mut out = vec![Node::new("#terminal", "Terminal", "terminal", NodeIcon::Server).detail("interactive shell")];
@@ -500,6 +568,9 @@ mod tests {
         u.insert("file".into(), src.display().to_string());
         s.run_action(&home, "upload", u).await.unwrap();
         let f = format!("f:{}", join(home.strip_prefix("d:").unwrap(), "ovc-ssh.txt"));
+        let l = s.list_dir(Some(&home), "ovc-ssh").await.unwrap();
+        assert!(l.entries.iter().any(|e| e.id == f && e.size == Some(9) && e.modified.is_some()), "{:?}", l.entries);
+        assert!(s.file_browser() && s.root_dir().as_deref() == Some(home.as_str()));
         let Content::Text(t) = s.open(&f, OpenOptions::default()).await.unwrap() else { panic!() };
         assert_eq!(t, "over sftp");
         s.run_action(&f, "rm", Args::new()).await.unwrap();

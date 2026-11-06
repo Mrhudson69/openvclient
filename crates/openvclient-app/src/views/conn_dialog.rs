@@ -575,9 +575,9 @@ impl ConnDialog {
             }
             FieldKind::Choice(opts) => {
                 let v = self.p.params.entry(f.key.into()).or_insert_with(|| f.default.into());
-                egui::ComboBox::from_id_salt(f.key).selected_text(v.clone()).show_ui(ui, |ui| {
+                egui::ComboBox::from_id_salt(f.key).selected_text(openvclient_core::choice_label(f.key, v)).show_ui(ui, |ui| {
                     for o in *opts {
-                        ui.selectable_value(v, o.to_string(), *o);
+                        ui.selectable_value(v, o.to_string(), openvclient_core::choice_label(f.key, o));
                     }
                 });
             }

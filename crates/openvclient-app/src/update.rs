@@ -7,6 +7,8 @@ use std::time::Duration;
 use openvclient_core::{Error, Result};
 
 pub const REPO: &str = "Mrhudson69/openvclient";
+/// Project website.
+pub const WEBSITE: &str = "https://openvclient.xyz/";
 /// Recent releases, newest first (includes pre-releases, excludes drafts).
 const API: &str = "https://api.github.com/repos/Mrhudson69/openvclient/releases?per_page=30";
 

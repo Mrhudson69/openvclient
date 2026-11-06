@@ -462,6 +462,78 @@ impl ServiceSession for AzureSession {
 
 #[async_trait]
 impl ResourceSession for AzureSession {
+    fn file_browser(&self) -> bool {
+        true
+    }
+
+    async fn list_dir(&self, node: Option<&str>, filter: &str) -> Result<FileListing> {
+        let Some(id) = node else {
+            let list = match &self.only_container {
+                Some(c) => vec![c.clone()],
+                None => self.az.containers().await?,
+            };
+            let f = filter.trim().to_lowercase();
+            let entries = list
+                .into_iter()
+                .filter(|c| f.is_empty() || c.to_lowercase().contains(&f))
+                .map(|c| FileEntry { id: format!("c/{c}"), name: c, is_dir: true, size: None, modified: None, detail: Some("Container".into()), kind: "container".into() })
+                .collect();
+            return Ok(FileListing { entries, truncated: false });
+        };
+        let (k, c, key) = parse(id).ok_or_else(|| Error::invalid("Bad node"))?;
+        if k != 'c' && k != 'p' {
+            return Err(Error::invalid("Not a folder"));
+        }
+        let prefix = format!("{key}{}", filter.trim());
+        let (folders, blobs, more) = self.az.list(c, &prefix, 5000).await?;
+        let mut entries: Vec<FileEntry> =
+            folders.into_iter().map(|f| FileEntry { id: format!("p/{c}/{f}"), name: leaf(&f).to_string(), is_dir: true, size: None, modified: None, detail: None, kind: "prefix".into() }).collect();
+        entries.extend(blobs.into_iter().filter(|b| b.name != key && !b.name.ends_with("/.keep")).map(|b| FileEntry {
+            id: format!("b/{c}/{}", b.name),
+            name: leaf(&b.name).to_string(),
+            is_dir: false,
+            size: Some(b.size),
+            modified: chrono::DateTime::parse_from_rfc2822(&b.modified).ok().map(|d| d.with_timezone(&chrono::Utc)),
+            // Only informative details: a real content type and the access tier.
+            detail: {
+                let ct = (!b.content_type.is_empty() && b.content_type != "application/octet-stream").then_some(b.content_type);
+                let tier = (!b.tier.is_empty()).then(|| format!("{} tier", b.tier));
+                match (ct, tier) {
+                    (Some(c), Some(t)) => Some(format!("{c} · {t}")),
+                    (c, t) => c.or(t),
+                }
+            },
+            kind: "blob".into(),
+        }));
+        Ok(FileListing { entries, truncated: more })
+    }
+
+    fn breadcrumbs(&self, node: &str) -> Vec<(String, String)> {
+        let Some((_, c, key)) = parse(node) else { return Vec::new() };
+        let mut out = vec![(format!("c/{c}"), c.to_string())];
+        let mut acc = String::new();
+        let segs: Vec<&str> = key.split('/').filter(|s| !s.is_empty()).collect();
+        let dir_segs = if node.starts_with("b/") { segs.len().saturating_sub(1) } else { segs.len() };
+        for s in &segs[..dir_segs] {
+            acc.push_str(s);
+            acc.push('/');
+            out.push((format!("p/{c}/{acc}"), s.to_string()));
+        }
+        out
+    }
+
+    fn file_actions(&self) -> FileActions {
+        FileActions {
+            upload: Some("upload"),
+            mkdir: Some("mkdir"),
+            download: Some("download"),
+            delete_file: Some("delete_blob"),
+            delete_dir: Some("delete_prefix"),
+            rename: None,
+            share: matches!(self.az.auth, Auth::SharedKey(_)).then_some("sas"),
+        }
+    }
+
     async fn children(&self, parent: Option<&str>) -> Result<Vec<Node>> {
         let Some(id) = parent else {
             let list = match &self.only_container {
@@ -724,6 +796,15 @@ mod tests {
         let mut u = Args::new();
         u.insert("file".into(), src.display().to_string());
         s.run_action("p/ovc-test/docs/", "upload", u).await.unwrap();
+        // File-manager listing: folder shows the blob with size and time; .keep is hidden.
+        let l = s.list_dir(Some("p/ovc-test/docs/"), "").await.unwrap();
+        let f = l.entries.iter().find(|e| e.name == "az hello.json").expect("listed");
+        assert!(!f.is_dir && f.size == Some(15) && f.modified.is_some(), "{f:?}");
+        assert!(!l.entries.iter().any(|e| e.name == ".keep"));
+        let top = s.list_dir(Some("c/ovc-test"), "").await.unwrap();
+        assert!(top.entries.iter().any(|e| e.is_dir && e.name == "docs"));
+        assert_eq!(s.breadcrumbs(&f.id), vec![("c/ovc-test".to_string(), "ovc-test".to_string()), ("p/ovc-test/docs/".to_string(), "docs".to_string())]);
+        assert!(s.list_dir(None, "").await.unwrap().entries.iter().any(|e| e.id == "c/ovc-test"));
         let kids = s.children(Some("p/ovc-test/docs/")).await.unwrap();
         let blob = kids.iter().find(|n| n.label == "az hello.json").expect("uploaded").id.clone();
         let Content::Json(j) = s.open(&blob, OpenOptions::default()).await.unwrap() else { panic!("json") };

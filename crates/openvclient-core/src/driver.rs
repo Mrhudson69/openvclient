@@ -208,3 +208,90 @@ pub fn elapsed_ms(d: Duration) -> String {
         format!("{:.2} s", ms / 1000.0)
     }
 }
+
+/// Display text for a `FieldKind::Choice` value (the stored value stays
+/// the same): "entra_interactive" -> "Microsoft Entra ID: interactive sign-in".
+pub fn choice_label(field: &str, value: &str) -> String {
+    let known = match (field, value) {
+        // Sign-in methods
+        (_, "sql") => "SQL Server login",
+        (_, "windows") => "Windows (NTLM user and password)",
+        (_, "integrated") => "Integrated (current Windows login)",
+        (_, "entra_password") => "Microsoft Entra ID: password",
+        (_, "entra_service_principal") => "Microsoft Entra ID: service principal",
+        (_, "entra_managed_identity") => "Microsoft Entra ID: managed identity",
+        (_, "entra_interactive") => "Microsoft Entra ID: interactive sign-in",
+        (_, "entra_default") => "Microsoft Entra ID: default credentials",
+        (_, "entra_token") => "Microsoft Entra ID: access token",
+        (_, "account_key") => "Account name and key",
+        (_, "connection_string") => "Connection string",
+        (_, "sas") => "SAS (shared access signature)",
+        (_, "anonymous") => "Anonymous (public access)",
+        (_, "azurite") => "Azurite (local emulator)",
+        (_, "api_key") => "API key",
+        (_, "basic") => "User and password",
+        (_, "keyboard_interactive") => "Keyboard-interactive (OTP / 2FA)",
+        (_, "key") => "Private key file",
+        (_, "key_text") => "Pasted private key",
+        (_, "certificate") => "OpenSSH certificate",
+        (_, "agent") => "SSH agent",
+        (_, "password") => "Password",
+        // Transport security
+        (_, "ftps") => "FTPS (explicit TLS)",
+        (_, "ftps_implicit") => "FTPS (implicit TLS)",
+        (_, "plain") => "Plain FTP (not encrypted)",
+        ("encrypt", "required") => "Required (verify certificate)",
+        ("encrypt", "on") => "On (trust any certificate)",
+        ("encrypt", "off") => "Off (login only)",
+        (_, "verify-ca") => "Verify CA",
+        (_, "verify-full") => "Verify full",
+        (_, "verify_identity") => "Verify identity",
+        // Clouds and misc
+        ("cloud", "public") => "Azure public cloud",
+        ("cloud", "china") => "Azure China",
+        ("cloud", "usgov") => "Azure US Government",
+        ("ackmode", "requeue") => "Peek (put messages back)",
+        ("ackmode", "ack") => "Take (remove from queue)",
+        (_, "none") => "None",
+        (_, "default") => "Default",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_string();
+    }
+    // Fallback: snake/kebab case to words, keeping common acronyms.
+    const ACRONYMS: &[&str] =
+        &["sql", "ssh", "sftp", "ftp", "ftps", "tls", "ssl", "id", "api", "url", "uri", "sas", "http", "https", "aws", "ca", "otp", "json", "csv", "rest", "s3", "ip", "dns", "ad"];
+    let mut out = Vec::new();
+    for (i, w) in value.split(['_', '-']).filter(|w| !w.is_empty()).enumerate() {
+        let lw = w.to_ascii_lowercase();
+        if ACRONYMS.contains(&lw.as_str()) {
+            out.push(lw.to_ascii_uppercase());
+        } else if w.chars().any(|c| c.is_ascii_uppercase()) {
+            out.push(w.to_string()); // keep e.g. "Hot", "Archive"
+        } else if i == 0 {
+            let mut c = lw.chars();
+            out.push(c.next().map(|f| f.to_ascii_uppercase().to_string() + c.as_str()).unwrap_or_default());
+        } else {
+            out.push(lw);
+        }
+    }
+    if out.is_empty() { value.to_string() } else { out.join(" ") }
+}
+
+#[cfg(test)]
+mod choice_tests {
+    use super::choice_label;
+
+    #[test]
+    fn labels() {
+        assert_eq!(choice_label("auth", "sas"), "SAS (shared access signature)");
+        assert_eq!(choice_label("auth", "entra_interactive"), "Microsoft Entra ID: interactive sign-in");
+        assert_eq!(choice_label("auth", "connection_string"), "Connection string");
+        assert_eq!(choice_label("encrypt", "on"), "On (trust any certificate)");
+        assert_eq!(choice_label("x", "some_new_value"), "Some new value");
+        assert_eq!(choice_label("x", "rest_api"), "REST API");
+        assert_eq!(choice_label("tier", "Hot"), "Hot");
+        assert_eq!(choice_label("type", "fanout"), "Fanout");
+    }
+}

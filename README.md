@@ -1,6 +1,10 @@
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/brand/openvclient-logo-dark.svg"><img src="assets/brand/openvclient-logo-light.svg" alt="OpenVClient" height="88"></picture></p>
+
 # OpenVClient
 
 **One open-source desktop app for your databases and infrastructure.**
+
+**Website:** [openvclient.xyz](https://openvclient.xyz) · **Download:** [latest release](https://github.com/Mrhudson69/openvclient/releases)
 
 OpenVClient is a native, GPU-rendered desktop client written in Rust with [egui](https://github.com/emilk/egui). Use it to browse, query, edit, monitor and administer relational databases, document stores, key-value stores, search engines and container hosts. It runs on macOS, Windows and Linux.
 

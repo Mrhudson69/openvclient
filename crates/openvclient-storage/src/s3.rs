@@ -294,6 +294,70 @@ impl ServiceSession for S3Session {
 
 #[async_trait]
 impl ResourceSession for S3Session {
+    fn file_browser(&self) -> bool {
+        true
+    }
+
+    async fn list_dir(&self, node: Option<&str>, filter: &str) -> Result<FileListing> {
+        let Some(id) = node else {
+            let f = filter.trim().to_lowercase();
+            let entries = self
+                .buckets()
+                .await?
+                .into_iter()
+                .filter(|b| f.is_empty() || b.to_lowercase().contains(&f))
+                .map(|b| FileEntry { id: format!("b/{b}"), name: b, is_dir: true, size: None, modified: None, detail: Some("Bucket".into()), kind: "bucket".into() })
+                .collect();
+            return Ok(FileListing { entries, truncated: false });
+        };
+        let (k, bucket, key) = parse(id).ok_or_else(|| Error::invalid("Bad node"))?;
+        if k != 'b' && k != 'p' {
+            return Err(Error::invalid("Not a folder"));
+        }
+        let r = self.list(bucket, &format!("{key}{}", filter.trim()), None, 1000).await?;
+        let mut entries: Vec<FileEntry> = r
+            .common_prefixes
+            .iter()
+            .map(|c| FileEntry { id: format!("p/{bucket}/{}", c.prefix), name: leaf(&c.prefix).to_string(), is_dir: true, size: None, modified: None, detail: None, kind: "prefix".into() })
+            .collect();
+        entries.extend(r.contents.iter().filter(|o| o.key != key).map(|o| FileEntry {
+            id: format!("o/{bucket}/{}", o.key),
+            name: leaf(&o.key).to_string(),
+            is_dir: false,
+            size: o.size,
+            modified: o.last_modified.as_deref().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|d| d.with_timezone(&chrono::Utc)),
+            detail: o.storage_class.clone(),
+            kind: "object".into(),
+        }));
+        Ok(FileListing { entries, truncated: r.next_continuation_token.is_some() })
+    }
+
+    fn breadcrumbs(&self, node: &str) -> Vec<(String, String)> {
+        let Some((_, bucket, key)) = parse(node) else { return Vec::new() };
+        let mut out = vec![(format!("b/{bucket}"), bucket.to_string())];
+        let segs: Vec<&str> = key.split('/').filter(|s| !s.is_empty()).collect();
+        let n = if node.starts_with("o/") { segs.len().saturating_sub(1) } else { segs.len() };
+        let mut acc = String::new();
+        for s in &segs[..n] {
+            acc.push_str(s);
+            acc.push('/');
+            out.push((format!("p/{bucket}/{acc}"), s.to_string()));
+        }
+        out
+    }
+
+    fn file_actions(&self) -> FileActions {
+        FileActions {
+            upload: Some("upload"),
+            mkdir: Some("mkdir"),
+            download: Some("download"),
+            delete_file: Some("delete_object"),
+            delete_dir: Some("delete_prefix"),
+            rename: None,
+            share: Some("presign"),
+        }
+    }
+
     async fn children(&self, parent: Option<&str>) -> Result<Vec<Node>> {
         let Some(id) = parent else {
             return Ok(self.buckets().await?.into_iter().map(|b| Node::new(format!("b/{b}"), &b, "bucket", NodeIcon::Bucket).folder()).collect());
@@ -583,6 +647,11 @@ mod tests {
         assert!(top.iter().any(|n| n.id == "p/ovc-test/docs/"), "{:?}", top.iter().map(|n| &n.id).collect::<Vec<_>>());
         let kids = s.children(Some("p/ovc-test/docs/")).await.unwrap();
         assert!(kids.iter().any(|n| n.id == "o/ovc-test/docs/hello.json"), "{:?}", kids.iter().map(|n| &n.id).collect::<Vec<_>>());
+        let l = s.list_dir(Some("p/ovc-test/docs/"), "").await.unwrap();
+        let f = l.entries.iter().find(|e| e.name == "hello.json").expect("listed");
+        assert!(!f.is_dir && f.size == Some(18) && f.modified.is_some(), "{f:?}");
+        assert!(s.list_dir(Some("b/ovc-test"), "").await.unwrap().entries.iter().any(|e| e.is_dir && e.name == "docs"));
+        assert_eq!(s.breadcrumbs("o/ovc-test/docs/hello.json").len(), 2);
         let Content::Json(j) = s.open("o/ovc-test/docs/hello.json", OpenOptions::default()).await.unwrap() else { panic!("json preview") };
         assert!(j.contains("world"));
         assert!(matches!(s.open("b/ovc-test", OpenOptions { limit: 100, ..Default::default() }).await.unwrap(), Content::TableWithNote(..)));

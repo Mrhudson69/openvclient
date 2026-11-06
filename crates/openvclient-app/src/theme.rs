@@ -263,3 +263,31 @@ pub fn danger_button(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Respon
     let t = tokens(ui);
     ui.add(egui::Button::new(egui::RichText::new(text.into()).color(Color32::WHITE).strong()).fill(if ui.visuals().dark_mode { Color32::from_rgb(0xb9, 0x1c, 0x1c) } else { t.destructive }))
 }
+
+/// The OpenVClient logo mark ("Vee"), matching the current theme: the light
+/// variant has an ink outline, the dark one a cream outline and coral shadow.
+/// Textures are decoded once and cached in egui's memory.
+pub fn brand_mark(ui: &mut egui::Ui, size: f32) -> egui::Response {
+    let dark = ui.visuals().dark_mode;
+    let key = egui::Id::unique(("openvclient_brand_mark", dark));
+    let tex = ui.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(key)).unwrap_or_else(|| {
+        let bytes: &[u8] = if dark { include_bytes!("../assets/brand/mark-dark.png") } else { include_bytes!("../assets/brand/mark-light.png") };
+        let img = image::load_from_memory(bytes).map(|i| i.to_rgba8()).unwrap_or_default();
+        let color = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
+        let tex = ui.ctx().load_texture("openvclient-brand-mark", color, egui::TextureOptions::LINEAR);
+        ui.ctx().data_mut(|d| d.insert_temp(key, tex.clone()));
+        tex
+    });
+    ui.add(egui::Image::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(size, size))))
+}
+
+/// "OpenVClient" with the brand-green V, as in the logo.
+pub fn wordmark(ui: &mut egui::Ui, size: f32) -> egui::Response {
+    let t = tokens(ui);
+    let mut job = egui::text::LayoutJob::default();
+    let fmt = |c: Color32| egui::TextFormat { font_id: egui::FontId::proportional(size), color: c, ..Default::default() };
+    job.append("Open", 0.0, fmt(t.fg));
+    job.append("V", 0.0, fmt(t.accent));
+    job.append("Client", 0.0, fmt(t.fg));
+    ui.add(egui::Label::new(job).selectable(false))
+}

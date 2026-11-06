@@ -268,6 +268,31 @@ impl Driver for FtpDriver {
     }
 }
 
+/// Breadcrumbs for absolute paths: "/", "/a", "/a/b" (folders only).
+fn path_crumbs(node: &str, home: &str) -> Vec<(String, String)> {
+    let (is_file, path) = match node.split_once(':') {
+        Some(("f", p)) => (true, p),
+        Some((_, p)) => (false, p),
+        None => return Vec::new(),
+    };
+    let dir = if is_file { parent(path) } else { path.to_string() };
+    let mut out = vec![("d:/".to_string(), "/".to_string())];
+    let mut acc = String::new();
+    for s in dir.split('/').filter(|s| !s.is_empty()) {
+        acc.push('/');
+        acc.push_str(s);
+        out.push((format!("d:{acc}"), s.to_string()));
+    }
+    // Start the trail at the home folder when the path is inside it.
+    if let Some(i) = out.iter().position(|(id, _)| id == &format!("d:{home}"))
+        && i > 0
+    {
+        out.drain(..i);
+        out[0].1 = format!("{} (home)", out[0].1);
+    }
+    out
+}
+
 fn join(dir: &str, name: &str) -> String {
     if dir.ends_with('/') { format!("{dir}{name}") } else { format!("{dir}/{name}") }
 }
@@ -284,6 +309,7 @@ struct Entry {
     dir: bool,
     size: u64,
     modified: Option<String>,
+    mtime: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 fn parse_listing(lines: &[String]) -> Vec<Entry> {
@@ -296,6 +322,7 @@ fn parse_listing(lines: &[String]) -> Vec<Entry> {
             dir: f.is_directory(),
             size: f.size() as u64,
             modified: Some(chrono::DateTime::<chrono::Utc>::from(f.modified()).format("%Y-%m-%d %H:%M").to_string()),
+            mtime: Some(chrono::DateTime::<chrono::Utc>::from(f.modified())),
         })
         .collect()
 }
@@ -399,6 +426,49 @@ impl ServiceSession for FtpSession {
 
 #[async_trait]
 impl ResourceSession for FtpSession {
+    fn file_browser(&self) -> bool {
+        true
+    }
+
+    async fn list_dir(&self, node: Option<&str>, filter: &str) -> Result<FileListing> {
+        let dir = match node {
+            None => self.home.clone(),
+            Some(id) => id.strip_prefix("d:").ok_or_else(|| Error::invalid("Not a folder"))?.to_string(),
+        };
+        let f = filter.trim().to_lowercase();
+        let entries = self
+            .ls(&dir)
+            .await?
+            .into_iter()
+            .filter(|e| f.is_empty() || e.name.to_lowercase().contains(&f))
+            .map(|e| {
+                let path = join(&dir, &e.name);
+                FileEntry {
+                    id: format!("{}:{path}", if e.dir { "d" } else { "f" }),
+                    name: e.name,
+                    is_dir: e.dir,
+                    size: (!e.dir).then_some(e.size),
+                    modified: e.mtime,
+                    detail: None,
+                    kind: if e.dir { "dir" } else { "file" }.into(),
+                }
+            })
+            .collect();
+        Ok(FileListing { entries, truncated: false })
+    }
+
+    fn breadcrumbs(&self, node: &str) -> Vec<(String, String)> {
+        path_crumbs(node, &self.home)
+    }
+
+    fn root_dir(&self) -> Option<String> {
+        Some(format!("d:{}", self.home))
+    }
+
+    fn file_actions(&self) -> FileActions {
+        FileActions { upload: Some("upload"), mkdir: Some("mkdir"), download: Some("download"), delete_file: Some("rm"), delete_dir: Some("rmdir"), rename: Some("rename"), share: None }
+    }
+
     async fn children(&self, parent_id: Option<&str>) -> Result<Vec<Node>> {
         let dir = match parent_id {
             None => self.home.clone(),
@@ -590,6 +660,10 @@ mod tests {
         let mut u = Args::new();
         u.insert("file".into(), src.display().to_string());
         s.run_action(&dir, "upload", u).await.unwrap();
+        let l = s.list_dir(Some(&dir), "").await.unwrap();
+        let f = l.entries.iter().find(|e| e.name == "hello.txt").expect("listed");
+        assert!(!f.is_dir && f.size == Some(9), "{f:?}");
+        assert!(s.root_dir().is_some() && !s.breadcrumbs(&f.id).is_empty());
         let kids = s.children(Some(&dir)).await.unwrap();
         let file = kids.iter().find(|n| n.label == "hello.txt").expect("uploaded").id.clone();
         let Content::Text(t) = s.open(&file, OpenOptions::default()).await.unwrap() else { panic!("text") };

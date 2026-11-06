@@ -53,7 +53,19 @@ def vertical_gradient(size, top, bottom):
     return img
 
 
+LOGO_MASTER = os.path.join(ROOT, "assets", "icon", "openvclient.png")
+
+
 def icon_master(S=1024):
+    """The logo mark ("Vee"), rendered from assets/brand/openvclient-mark-light.svg
+    by scripts/make-logo.py and saved as assets/icon/openvclient.png. Falls back
+    to the legacy drawn icon when the master is missing."""
+    if os.path.exists(LOGO_MASTER):
+        return Image.open(LOGO_MASTER).convert("RGBA").resize((S, S), Image.LANCZOS)
+    return legacy_icon(S)
+
+
+def legacy_icon(S=1024):
     """Squircle tile with a stacked-database mark and a connection node."""
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     # macOS icon grid: ~824 px body inside 1024, soft drop shadow.
@@ -167,7 +179,8 @@ def main():
         print("Inno Setup wizard images written to assets/installer/")
         return
     master = icon_master(1024)
-    master.save(os.path.join(ICON_DIR, "openvclient.png"))
+    if not os.path.exists(LOGO_MASTER):
+        master.save(LOGO_MASTER)
     master.resize((256, 256), Image.LANCZOS).save(os.path.join(ICON_DIR, "openvclient-256.png"))
     master.save(os.path.join(ICON_DIR, "openvclient.ico"), sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 

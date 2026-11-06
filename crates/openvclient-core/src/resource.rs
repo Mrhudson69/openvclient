@@ -142,6 +142,49 @@ impl ActionOutcome {
 
 pub type Args = BTreeMap<String, String>;
 
+/// One entry of a folder in a file-style browser (object storage, FTP, SFTP).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileEntry {
+    /// Node id: opening it (folder) lists it, actions run against it.
+    pub id: String,
+    pub name: String,
+    pub is_dir: bool,
+    /// Bytes; `None` for folders or when unknown.
+    pub size: Option<u64>,
+    /// Modification time in UTC, when the server reports one.
+    pub modified: Option<chrono::DateTime<chrono::Utc>>,
+    /// Content type or storage tier, shown as extra detail.
+    pub detail: Option<String>,
+    /// Node kind, for `actions(kind)`, e.g. `blob`, `prefix`.
+    pub kind: String,
+}
+
+/// Which actions the file manager maps to its buttons. `None` hides one.
+#[derive(Clone, Debug)]
+pub struct FileActions {
+    pub upload: Option<&'static str>,
+    pub mkdir: Option<&'static str>,
+    pub download: Option<&'static str>,
+    pub delete_file: Option<&'static str>,
+    pub delete_dir: Option<&'static str>,
+    pub rename: Option<&'static str>,
+    pub share: Option<&'static str>,
+}
+
+impl Default for FileActions {
+    fn default() -> Self {
+        Self { upload: Some("upload"), mkdir: Some("mkdir"), download: Some("download"), delete_file: None, delete_dir: None, rename: None, share: None }
+    }
+}
+
+/// A folder listing.
+#[derive(Clone, Debug, Default)]
+pub struct FileListing {
+    pub entries: Vec<FileEntry>,
+    /// More entries exist than were returned (narrow with the filter).
+    pub truncated: bool,
+}
+
 /// Keystrokes and size changes sent to an interactive terminal.
 #[derive(Clone, Debug)]
 pub enum TermInput {
@@ -177,6 +220,34 @@ pub trait ResourceSession: ServiceSession {
     /// Actions for a node kind; `""` is the connection (root) itself.
     fn actions(&self, kind: &str) -> Vec<ActionSpec>;
     async fn run_action(&self, node: &str, action: &str, args: Args) -> Result<ActionOutcome>;
+    /// Whether this connection is browsed like a file system: the app then
+    /// shows a file-manager view using `list_dir` and `breadcrumbs`.
+    fn file_browser(&self) -> bool {
+        false
+    }
+    /// Folder the file manager opens first; `None` = the top level
+    /// (buckets/containers). FTP/SFTP start in the login folder.
+    fn root_dir(&self) -> Option<String> {
+        None
+    }
+    /// List one folder (`None` = the top level, e.g. buckets/containers).
+    /// `filter` narrows by name prefix where the server supports it.
+    async fn list_dir(&self, node: Option<&str>, filter: &str) -> Result<FileListing> {
+        let _ = (node, filter);
+        Err(crate::Error::unsupported("Not a file-style connection"))
+    }
+    /// Path from the top level to `node`, as (node id, label) pairs,
+    /// excluding the connection itself.
+    fn breadcrumbs(&self, node: &str) -> Vec<(String, String)> {
+        let _ = node;
+        Vec::new()
+    }
+    /// Action ids for the file manager's buttons, when the connector names
+    /// them differently: (upload, mkdir, download, delete_file, delete_dir, share).
+    fn file_actions(&self) -> FileActions {
+        FileActions::default()
+    }
+
     /// Whether `open_terminal` is available.
     fn supports_terminal(&self) -> bool {
         false

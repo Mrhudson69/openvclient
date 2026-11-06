@@ -96,7 +96,7 @@ layout_into() {
   <metadata_license>MIT</metadata_license>
   <project_license>MIT OR Apache-2.0</project_license>
   <launchable type="desktop-id">openvclient.desktop</launchable>
-  <url type="homepage">https://github.com/Mrhudson69/openvclient</url>
+  <url type="homepage">https://openvclient.xyz</url>
   <description><p>Manage PostgreSQL, MySQL/MariaDB, SQL Server, SQLite, ClickHouse, MongoDB, Redis, Elasticsearch, RabbitMQ, Docker, SSH, FTP, S3-compatible and Azure Blob storage from one native window. Secrets stay in the system keyring.</p></description>
   <releases><release version="${VERSION}"/></releases>
   <content_rating type="oars-1.1"/>
@@ -163,7 +163,7 @@ Depends: libc6 (>= 2.35), libssl3 | libssl3t64, libgl1, libegl1, libxkbcommon0, 
 Recommends: gnome-keyring | kwalletmanager | keepassxc, xdg-desktop-portal
 Suggests: postgresql-client, default-mysql-client, openssh-client
 Maintainer: OpenVClient contributors <maintainers@users.noreply.github.com>
-Homepage: https://github.com/Mrhudson69/openvclient
+Homepage: https://openvclient.xyz
 Description: ${SUMMARY}
  Native desktop client for PostgreSQL, MySQL/MariaDB, SQL Server, SQLite,
  ClickHouse, Redis, MongoDB, Elasticsearch, RabbitMQ, Docker, SSH, FTP,

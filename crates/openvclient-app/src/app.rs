@@ -99,6 +99,8 @@ pub struct UpdateState {
     pub available: Option<crate::update::Release>,
     /// The user asked (show "up to date" too).
     manual: bool,
+    /// Outcome of the last check, for the About panel.
+    pub last: Option<String>,
     started: bool,
     show: bool,
 }
@@ -133,6 +135,7 @@ pub struct AppCtx {
     pub dirty: bool,
     pub last_save: Instant,
     pub show_settings: bool,
+    pub show_about: bool,
     /// Statements confirmed for production, keyed by tab id.
     pub pending_sql: Option<(u64, Vec<String>)>,
     /// Confirmed destructive resource actions, picked up by the connection's tab.
@@ -211,6 +214,7 @@ pub enum TabKind {
     Docker(Box<views::docker::DockerTab>),
     Resource(Box<views::resource::ResourceTab>),
     Terminal(Box<views::terminal::TerminalTab>),
+    Files(Box<views::files::FilesTab>),
 }
 
 pub struct Tab {
@@ -231,6 +235,7 @@ impl Tab {
             TabKind::Docker(t) => Some(t.conn),
             TabKind::Resource(t) => Some(t.conn),
             TabKind::Terminal(t) => Some(t.conn),
+            TabKind::Files(t) => Some(t.conn),
         }
     }
 
@@ -250,6 +255,7 @@ impl Tab {
                 None => ico(ICON_DNS, &conn),
             },
             TabKind::Terminal(_) => ico(ICON_TERMINAL, &format!("Terminal · {conn}")),
+            TabKind::Files(t) => ico(ICON_FOLDER_OPEN, &format!("{conn} · {}", t.title())),
         }
     }
 
@@ -264,6 +270,7 @@ impl Tab {
             TabKind::Redis(t) => Some(format!("redis:{}:{}", t.conn, t.db)),
             TabKind::Docker(t) => Some(format!("docker:{}", t.conn)),
             TabKind::Resource(t) => Some(format!("res:{}", t.conn)),
+            TabKind::Files(t) => Some(format!("files:{}", t.conn)),
             TabKind::Sql(_) | TabKind::Terminal(_) => None,
         }
     }
@@ -296,6 +303,7 @@ impl Behavior<Tab> for Viewer<'_> {
                 TabKind::Docker(t) => t.ui(ui, self.cx, id),
                 TabKind::Resource(t) => t.ui(ui, self.cx, id),
                 TabKind::Terminal(t) => t.ui(ui, self.cx),
+                TabKind::Files(t) => t.ui(ui, self.cx),
             }
         });
         UiResponse::None
@@ -427,6 +435,7 @@ impl OpenvApp {
             dirty: false,
             last_save: Instant::now(),
             show_settings: false,
+            show_about: false,
             pending_sql: None,
             resource_jobs: HashMap::new(),
             store,
@@ -529,6 +538,21 @@ impl OpenvApp {
                         d.section = section;
                     }
                     self.open(TabKind::Docker(Box::new(views::docker::DockerTab::new(conn, section))));
+                }
+                Cmd::OpenResource { conn, node, action } if action.is_none() && self.cx.conns.session(conn).and_then(|h| h.resource()).is_some_and(|r| r.file_browser()) => {
+                    // Storage connections open in the file manager; a file node opens its folder.
+                    let folder = node.as_ref().filter(|n| n.expandable).map(|n| n.id.clone());
+                    let key = format!("files:{conn}");
+                    if let Some(id) = self.find(|t| t.key().as_deref() == Some(key.as_str())) {
+                        if let Some(Tile::Pane(Tab { kind: TabKind::Files(f), .. })) = self.tree.tiles.get_mut(id)
+                            && node.is_some()
+                        {
+                            f.navigate(folder);
+                        }
+                        self.activate(id);
+                    } else {
+                        self.open(TabKind::Files(Box::new(views::files::FilesTab::new(conn, folder))));
+                    }
                 }
                 Cmd::OpenResource { conn, node, action } => {
                     let key = format!("res:{conn}");
@@ -697,8 +721,8 @@ impl OpenvApp {
             }
             ui.horizontal_centered(|ui| {
                 ui.add_space(theme::space::XS);
-                ui.label(RichText::new(String::from(ICON_DATABASE)).size(theme::icon::LG).color(theme::tokens(ui).accent));
-                ui.label(RichText::new("OpenVClient").strong().size(15.0));
+                theme::brand_mark(ui, 26.0);
+                theme::wordmark(ui, 16.0);
                 ui.add_space(theme::space::LG);
                 let search = ui.add_sized(
                     [340.0, 26.0],
@@ -711,6 +735,9 @@ impl OpenvApp {
                     ui.add_space(theme::space::XS);
                     if ui.button(String::from(ICON_SETTINGS)).on_hover_text("Settings").clicked() {
                         self.cx.show_settings = !self.cx.show_settings;
+                    }
+                    if ui.button(String::from(ICON_INFO)).on_hover_text(format!("About OpenVClient {}", env!("CARGO_PKG_VERSION"))).clicked() {
+                        self.cx.show_about = !self.cx.show_about;
                     }
                     let (icon, next, tip) = match self.cx.store.ws.settings.theme {
                         ThemeChoice::System => (ICON_CONTRAST, ThemeChoice::Dark, "Theme: system (click for dark)"),
@@ -918,6 +945,97 @@ impl OpenvApp {
         }
     }
 
+    fn about_window(&mut self, ctx: &egui::Context) {
+        if !self.cx.show_about {
+            return;
+        }
+        let version = env!("CARGO_PKG_VERSION");
+        let beta = crate::update::is_prerelease(version);
+        let mut close = false;
+        egui::Modal::new(egui::Id::unique("about")).show(ctx, |ui| {
+            ui.set_width(460.0_f32.min(ctx.content_rect().width() - 48.0));
+            let t = theme::tokens(ui);
+            ui.horizontal(|ui| {
+                theme::brand_mark(ui, 56.0);
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        theme::wordmark(ui, 22.0);
+                        if beta {
+                            theme::badge(ui, "Beta", t.warning);
+                        }
+                    });
+                    ui.label(RichText::new(format!("Version {version} · {} {}", std::env::consts::OS, std::env::consts::ARCH)).color(t.muted_fg));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    if ui.button(String::from(ICON_CLOSE)).on_hover_text("Close (Esc)").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        close = true;
+                    }
+                });
+            });
+            ui.add_space(theme::space::SM);
+            ui.label(RichText::new("Free, open-source desktop client for databases, object storage and servers.").color(t.fg));
+            ui.add_space(theme::space::MD);
+
+            // Updates
+            egui::Frame::new().fill(t.muted).corner_radius(8.0).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    let checking = self.cx.update.job.is_some();
+                    if checking {
+                        ui.spinner();
+                        ui.label("Checking for updates…");
+                    } else if let Some(rel) = self.cx.update.available.clone() {
+                        ui.label(RichText::new(ico(ICON_UPGRADE, &format!("Version {} is available", rel.version))).color(t.info));
+                    } else {
+                        ui.label(RichText::new(self.cx.update.last.clone().unwrap_or_else(|| "Updates are checked at start-up".into())).color(t.muted_fg));
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.cx.update.available.is_some() {
+                            if theme::primary_button(ui, ico(ICON_DOWNLOAD, "Update")).clicked() {
+                                self.cx.update.show = true;
+                                close = true;
+                            }
+                        } else if ui.add_enabled(!checking, egui::Button::new(ico(ICON_REFRESH, "Check for updates"))).clicked() {
+                            self.cx.check_updates(true);
+                        }
+                    });
+                });
+            });
+            ui.add_space(theme::space::MD);
+
+            // Links
+            let link = |ui: &mut egui::Ui, icon, text: &str, url: &str| {
+                if ui.add(egui::Button::new(ico(icon, text)).frame(false)).on_hover_text(url).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    crate::update::open_url(url);
+                }
+            };
+            let repo = format!("https://github.com/{}", crate::update::REPO);
+            ui.horizontal_wrapped(|ui| {
+                link(ui, ICON_LANGUAGE, "Website", crate::update::WEBSITE);
+                link(ui, ICON_CODE, "Source on GitHub", &repo);
+                link(ui, ICON_NEW_RELEASES, "Release notes", &format!("{repo}/releases"));
+                link(ui, ICON_BUG_REPORT, "Report a bug", &format!("{repo}/issues/new/choose"));
+            });
+            ui.add_space(theme::space::SM);
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("MIT OR Apache-2.0 · © OpenVClient contributors").small().color(t.muted_fg));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button(ico(ICON_CONTENT_COPY, "Copy version info")).clicked() {
+                        ui.ctx().copy_text(format!("OpenVClient {version}\n{} {} ", std::env::consts::OS, std::env::consts::ARCH));
+                        self.cx.toasts.ok("Version info copied");
+                    }
+                });
+            });
+            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                close = true;
+            }
+        });
+        if close {
+            self.cx.show_about = false;
+        }
+    }
+
     fn settings_window(&mut self, ctx: &egui::Context) {
         if !self.cx.show_settings {
             return;
@@ -969,6 +1087,7 @@ impl OpenvApp {
                     ui.add(egui::Slider::new(&mut s.editor_font_size, 10.0..=22.0).step_by(0.5).fixed_decimals(1).suffix(" px"));
                 });
                 row(ui, "Updates", "Check GitHub for a newer release at startup", &mut |ui| {
+                    ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).monospace());
                     ui.checkbox(&mut s.check_updates, "Check automatically");
                     if ui.button("Check now").clicked() {
                         check_now = true;
@@ -1051,6 +1170,11 @@ impl OpenvApp {
         }
         if let Some(r) = crate::bg::poll(&mut self.cx.update.job) {
             let manual = self.cx.update.manual;
+            self.cx.update.last = Some(match &r {
+                Ok(Some(rel)) => format!("Version {} is available", rel.version),
+                Ok(None) => "You're up to date".into(),
+                Err(e) => format!("Could not check: {}", openvclient_core::redact(&e.message)),
+            });
             match r {
                 Ok(Some(rel)) => {
                     tracing::info!(target: "openvclient", version = %rel.version, "update available");
@@ -1190,6 +1314,7 @@ impl eframe::App for OpenvApp {
         self.host_key_prompt(&ctx);
         self.confirm_dialog(&ctx);
         self.settings_window(&ctx);
+        self.about_window(&ctx);
         let tabs: Vec<(u64, String)> = self.tree.tiles.tiles().filter_map(|t| if let Tile::Pane(p) = t { Some((p.id, p.title(&self.cx))) } else { None }).collect();
         views::palette::show(&ctx, &mut self.cx, &tabs);
         self.cx.toasts.show(&ctx);
@@ -1400,12 +1525,108 @@ mod walkthrough {
         }
         shot(&mut h, &out, "13-settings");
         h.state_mut().cx.show_settings = false;
+        h.state_mut().cx.show_about = true;
+        shot(&mut h, &out, "13b-about");
+        h.state_mut().cx.show_about = false;
+        h.state_mut().cx.show_settings = false;
         apply_theme(&h.ctx, ThemeChoice::Light);
         h.state_mut().cx.cmd(Cmd::OpenHome);
         for _ in 0..6 {
             h.step();
         }
         shot(&mut h, &out, "14-home-light");
+        drop(h);
+        rt.shutdown_timeout(Duration::from_secs(1));
+    }
+
+    /// File-manager screenshots against the Azurite emulator (127.0.0.1:50000).
+    /// Run with OPENVCLIENT_CONFIG_DIR=<empty dir> OPENVCLIENT_SHOTS=<dir>
+    /// cargo test -p openvclient-app files_walkthrough -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn files_walkthrough() {
+        use openvclient_core::resource::{Args, Node, NodeIcon};
+        let out = std::path::PathBuf::from(std::env::var("OPENVCLIENT_SHOTS").expect("set OPENVCLIENT_SHOTS"));
+        std::fs::create_dir_all(&out).unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let handle = rt.handle().clone();
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_pixels_per_point(1.5).with_max_steps(64).build_eframe(move |cc| {
+            theme::install(&cc.egui_ctx);
+            OpenvApp::new(&cc.egui_ctx, handle, crate::registry())
+        });
+        let mut p = openvclient_core::ConnectionProfile::new("azure_blob", "Acme Analytics");
+        p.params.insert("auth".into(), "azurite".into());
+        p.params.insert("azurite_url".into(), "http://127.0.0.1:50000".into());
+        p.environment = openvclient_core::Environment::Production;
+        let id = p.id;
+        h.state_mut().cx.store.ws.profiles.push(p);
+        h.state_mut().cx.cmd(Cmd::Connect(id));
+        settle(&mut h, |a| a.cx.conns.is_connected(id), Duration::from_secs(15));
+        let s = h.state().cx.conns.session(id).and_then(|x| x.resource()).cloned().expect("azurite session");
+
+        // Seed: a container with folders and a few typical files.
+        let dir = std::env::temp_dir().join("ovc-files-shots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let files = [("alert_dump_01.00.parquet", 1_089_246), ("asset_dump_01.00.parquet", 742_311), ("summary.json", 2_048), ("readme.txt", 512), ("export.csv", 96_000)];
+        rt.block_on(async {
+            let mut a = Args::new();
+            a.insert("name".into(), "analytics-exports".into());
+            let _ = s.run_action("", "create_container", a).await;
+            for folder in ["20260224124307", "20260301081500", "archive"] {
+                let mut a = Args::new();
+                a.insert("name".into(), folder.into());
+                let _ = s.run_action("c/analytics-exports", "mkdir", a).await;
+            }
+            for (name, size) in files {
+                let path = dir.join(name);
+                let body = if name.ends_with(".json") {
+                    r#"{"alerts": 128, "assets": 3402, "generated": "2026-02-24T12:43:17Z"}"#.as_bytes().to_vec()
+                } else if name.ends_with(".txt") {
+                    b"Daily export from the analytics pipeline.\n".to_vec()
+                } else {
+                    vec![b'x'; size]
+                };
+                std::fs::write(&path, body).unwrap();
+                let mut a = Args::new();
+                a.insert("file".into(), path.display().to_string());
+                let _ = s.run_action("p/analytics-exports/20260224124307/", "upload", a).await;
+            }
+        });
+
+        // The sidebar loaded before seeding; reload it.
+        h.state_mut().cx.sidebar.forget(id);
+        // Top level, then inside a folder, then a file selected with preview.
+        h.state_mut().cx.cmd(Cmd::OpenResource { conn: id, node: None, action: None });
+        for _ in 0..4 {
+            h.step(); // let the tab start its load before waiting for it
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "f1-files-root");
+        let folder = Node::new("p/analytics-exports/20260224124307/", "20260224124307", "prefix", NodeIcon::Folder).folder();
+        h.state_mut().cx.cmd(Cmd::OpenResource { conn: id, node: Some(folder), action: None });
+        for _ in 0..4 {
+            h.step(); // let the tab start its load before waiting for it
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "f2-files-folder");
+        {
+            let app = h.state_mut();
+            if let Some(tid) = app.find(|t| matches!(t.kind, TabKind::Files(_)))
+                && let Some(Tile::Pane(Tab { kind: TabKind::Files(f), .. })) = app.tree.tiles.get_mut(tid)
+            {
+                f.click_name(&app.cx, "summary.json");
+            }
+        }
+        for _ in 0..4 {
+            h.step(); // let the tab start its load before waiting for it
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "f3-files-preview");
+        h.state_mut().cx.store.ws.settings.theme = crate::store::ThemeChoice::Light;
+        apply_theme(&h.ctx, crate::store::ThemeChoice::Light);
+        shot(&mut h, &out, "f4-files-light");
+        h.state_mut().cx.show_about = true;
+        shot(&mut h, &out, "f5-about");
         drop(h);
         rt.shutdown_timeout(Duration::from_secs(1));
     }

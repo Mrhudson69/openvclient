@@ -53,6 +53,7 @@ keyring = "4"
 rfd = "0.17"
 directories = "6"
 reqwest.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 aes-gcm = "0.10"
 getrandom = "0.2"
 base64 = "0.23"

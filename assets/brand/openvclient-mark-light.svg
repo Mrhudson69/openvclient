@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="OpenVClient"><title>OpenVClient</title><g transform="translate(0 0) scale(1.0)">
+  <rect x="58" y="58" width="420" height="420" rx="112" fill="#1A1612"/>
+  <rect x="34" y="34" width="420" height="420" rx="112" fill="#FFDB58" stroke="#1A1612" stroke-width="20"/>
+  <path d="M112 156 V352 A132 46 0 0 0 376 352 V156 Z" fill="#22C55E" stroke="#1A1612" stroke-width="18" stroke-linejoin="round"/>
+  <ellipse cx="244" cy="156" rx="132" ry="46" fill="#86EFAC" stroke="#1A1612" stroke-width="18"/>
+  <path d="M170 272 H214 L244 340 L274 272 H318 L268 384 H220 Z" fill="#FFF7E6" stroke="#1A1612" stroke-width="16" stroke-linejoin="round"/>
+  <circle cx="202" cy="236" r="19" fill="#FFFFFF" stroke="#1A1612" stroke-width="10"/>
+  <circle cx="286" cy="236" r="19" fill="#FFFFFF" stroke="#1A1612" stroke-width="10"/>
+  <circle cx="206" cy="239" r="8" fill="#1A1612"/>
+  <circle cx="290" cy="239" r="8" fill="#1A1612"/>
+  <path d="M398 74 L410 104 L440 116 L410 128 L398 158 L386 128 L356 116 L386 104 Z" fill="#4ECDC4" stroke="#1A1612" stroke-width="10" stroke-linejoin="round"/>
+</g></svg>
