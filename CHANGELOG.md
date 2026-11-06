@@ -4,6 +4,19 @@ All notable changes to OpenVClient are listed here. The project follows
 [Semantic Versioning](https://semver.org); pre-releases are tagged
 `vX.Y.Z-beta.N` and published as GitHub pre-releases.
 
+## [1.0.0-beta.2] — 2026-11-06
+
+Notes: [docs/release-notes/v1.0.0-beta.2.md](docs/release-notes/v1.0.0-beta.2.md).
+
+### Fixed
+- System clipboard: copy, cut and paste in all text fields, and the in-app Copy buttons, on macOS, Windows and Linux (eframe was built without its clipboard feature).
+- Hyperlinks open in the browser.
+- Update check: SemVer ordering for pre-releases and newer betas offered to beta users; stable users still see stable releases only.
+- Linux: .rpm files named with the release version so SHA256SUMS matches the downloads.
+
+### Build
+- Release workflow: macOS DMG step pins Python 3.12; later betas are titled "Beta vX.Y.Z (beta N)".
+
 ## [1.0.0-beta.1] — 2026-11-06
 
 First public beta. Full notes: [docs/release-notes/v1.0.0-beta.1.md](docs/release-notes/v1.0.0-beta.1.md).
@@ -20,4 +33,5 @@ First public beta. Full notes: [docs/release-notes/v1.0.0-beta.1.md](docs/releas
 - SSH host keys verified against known_hosts or confirmed by the user before first use.
 - See docs/SECURITY_AUDIT.md for the audit and fixes.
 
+[1.0.0-beta.2]: https://github.com/Mrhudson69/openvclient/releases/tag/v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/Mrhudson69/openvclient/releases/tag/v1.0.0-beta.1

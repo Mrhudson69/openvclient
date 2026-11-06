@@ -398,7 +398,12 @@ jobs:
           case "$TAG" in v0.*|*-*) prerelease="--prerelease" ;; esac
           # Title: "Beta v0.1.0" for v0.1.0-beta.N, "RC v1.0.0" for -rc.N, else the tag.
           case "$TAG" in
-            *-beta*) title="Beta ${TAG%%-*}" ;;
+            *-beta*)
+              title="Beta ${TAG%%-*}"
+              n=${TAG##*-beta.}
+              # Later betas get their number: "Beta v1.0.0 (beta 2)".
+              case "$n" in ''|1|*[!0-9]*) ;; *) title="$title (beta $n)" ;; esac
+              ;;
             *-alpha*) title="Alpha ${TAG%%-*}" ;;
             *-rc*) title="RC ${TAG%%-*}" ;;
             *) title="OpenVClient $TAG" ;;
