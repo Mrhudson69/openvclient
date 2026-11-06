@@ -336,7 +336,7 @@ fn connection_row(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile, ind
 fn connection_menu(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile) {
     let id = p.id;
     let fav = cx.store.is_favorite(id);
-    if ui.button(ico(if fav { ICON_STAR } else { ICON_STAR }, if fav { "Remove from favourites" } else { "Add to favourites" })).clicked() {
+    if ui.button(ico(ICON_STAR, if fav { "Remove from favourites" } else { "Add to favourites" })).clicked() {
         cx.store.toggle_favorite(id);
         cx.mark_dirty();
         ui.close();
