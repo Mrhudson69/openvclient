@@ -33,7 +33,7 @@ openvclient-sqlserver = { workspace = true, optional = true }
 openvclient-mongo = { workspace = true, optional = true }
 openvclient-http = { workspace = true, optional = true }
 openvclient-storage = { workspace = true, optional = true }
-vt100 = "0.16"
+vt100 = "0.18"
 
 anyhow.workspace = true
 chrono.workspace = true

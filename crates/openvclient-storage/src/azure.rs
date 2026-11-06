@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::Engine;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use openvclient_core::resource::*;
 use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Notifier, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 use openvclient_net::entra::{self, AZURE_STORAGE, DEFAULT_PUBLIC_CLIENT, Flow};

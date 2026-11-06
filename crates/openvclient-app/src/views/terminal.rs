@@ -13,6 +13,10 @@ use crate::theme::{self, ico};
 const SCROLLBACK: usize = 5000;
 const FONT: f32 = 13.0;
 
+fn nz(v: u16) -> std::num::NonZeroU16 {
+    std::num::NonZeroU16::new(v.max(1)).unwrap_or(std::num::NonZeroU16::MIN)
+}
+
 pub struct TerminalTab {
     pub conn: Uuid,
     term: Option<Terminal>,
@@ -65,7 +69,7 @@ fn idx_color(i: u8, dark: bool) -> Color32 {
 
 impl TerminalTab {
     pub fn new(conn: Uuid) -> Self {
-        Self { conn, term: None, job: None, parser: vt100::Parser::new(24, 80, SCROLLBACK), size: (24, 80), closed: None, error: None, scroll: 0, focused_once: false }
+        Self { conn, term: None, job: None, parser: vt100::Parser::new(nz(24), nz(80), SCROLLBACK), size: (24, 80), closed: None, error: None, scroll: 0, focused_once: false }
     }
 
     fn start(&mut self, cx: &AppCtx) {
@@ -75,7 +79,7 @@ impl TerminalTab {
         let (rows, cols) = self.size;
         self.closed = None;
         self.error = None;
-        self.parser = vt100::Parser::new(rows, cols, SCROLLBACK);
+        self.parser = vt100::Parser::new(nz(rows), nz(cols), SCROLLBACK);
         self.job = Some(cx.bg.spawn("Opening terminal", async move { s.open_terminal(cols, rows).await }));
     }
 
@@ -223,7 +227,7 @@ impl TerminalTab {
         let rows = ((avail.y - 12.0) / ch).floor().clamp(5.0, 300.0) as u16;
         if (rows, cols) != self.size {
             self.size = (rows, cols);
-            self.parser.screen_mut().set_size(rows, cols);
+            self.parser.screen_mut().set_size(nz(rows), nz(cols));
             if let Some(term) = &self.term {
                 let _ = term.input.send(TermInput::Resize { cols, rows });
             }
@@ -258,6 +262,7 @@ impl TerminalTab {
         let origin = rect.min + vec2(6.0, 6.0);
         let screen = self.parser.screen();
         let (srows, scols) = screen.size();
+        let (srows, scols) = (srows.get(), scols.get());
         let color = |c: vt100::Color, default: Color32| match c {
             vt100::Color::Default => default,
             vt100::Color::Idx(i) => idx_color(i, dark),

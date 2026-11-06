@@ -1,22 +1,31 @@
 version: 2
 updates:
+  # One grouped PR per ecosystem per month instead of one PR per crate.
   - package-ecosystem: cargo
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
+      interval: monthly
+    open-pull-requests-limit: 3
     groups:
       egui:
         patterns: ["egui*", "eframe", "epaint*", "emath", "ecolor"]
-      minor-and-patch:
+      rust-minor-and-patch:
         update-types: ["minor", "patch"]
+      rust-major:
+        update-types: ["major"]
+    ignore:
+      # Pinned: newer russh exposes a private type in the client Handler
+      # (host-key callback). Upgrade by hand when that is fixed.
+      - dependency-name: "russh"
     commit-message:
       prefix: "deps"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]
     commit-message:
       prefix: "ci"
