@@ -117,6 +117,16 @@ case "${1:-}" in
   --system) PREFIX=/usr/local ;;
   --uninstall) for p in "$HOME/.local" /usr/local; do rm -f "$p/bin/openvclient" "$p/share/applications/openvclient.desktop" "$p/share/metainfo/dev.openvclient.client.metainfo.xml"; find "$p/share/icons/hicolor" -name openvclient.png -delete 2>/dev/null || true; done; echo "OpenVClient removed."; exit 0 ;;
 esac
+# The window system loads these at start-up; name any that are missing.
+missing=""
+for lib in libxkbcommon.so.0 libxkbcommon-x11.so.0 libX11.so.6 libX11-xcb.so.1 libXcursor.so.1 libXrandr.so.2 libXi.so.6 libwayland-client.so.0 libEGL.so.1 libGL.so.1 libssl.so.3; do
+  ldconfig -p 2>/dev/null | grep -q "$lib" || missing="$missing $lib"
+done
+if [ -n "$missing" ]; then
+  echo "Warning: these system libraries were not found:$missing"
+  echo "  Debian/Ubuntu: sudo apt install libxkbcommon-x11-0 libx11-xcb1 libxcursor1 libxrandr2 libxi6 libwayland-client0 libegl1 libgl1 libssl3"
+  echo "  Fedora:        sudo dnf install libxkbcommon-x11 libX11-xcb libXcursor libXrandr libXi libwayland-client mesa-libEGL mesa-libGL openssl-libs"
+fi
 mkdir -p "$PREFIX"
 cp -R usr/bin usr/share "$PREFIX/"
 command -v update-desktop-database >/dev/null && update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
@@ -134,8 +144,11 @@ if command -v dpkg-deb >/dev/null; then
   layout_into "$DEB/usr"
   mkdir -p "$DEB/DEBIAN"
   SIZE=$(du -sk "$DEB" | cut -f1)
-  # Runtime: OpenSSL (native-tls for PG/MySQL/Redis), GL, xkbcommon. The keyring
-  # and file dialogs talk to D-Bus services that are recommended, not required.
+  # Runtime: OpenSSL (native-tls for PG/MySQL/Redis) plus the windowing and GL
+  # libraries. winit/glutin load the X11, Wayland, xkbcommon and EGL/GL
+  # libraries with dlopen at start-up, so dpkg-shlibdeps cannot see them and
+  # they must be listed here; without libxkbcommon-x11 the app aborts on X11.
+  # The keyring and file dialogs talk to D-Bus services (recommended only).
   cat > "$DEB/DEBIAN/control" <<CONTROL
 Package: openvclient
 Version: ${VERSION}
@@ -143,7 +156,7 @@ Section: database
 Priority: optional
 Architecture: ${DEBARCH}
 Installed-Size: ${SIZE}
-Depends: libc6 (>= 2.35), libssl3 | libssl3t64, libgl1, libxkbcommon0
+Depends: libc6 (>= 2.35), libssl3 | libssl3t64, libgl1, libegl1, libxkbcommon0, libxkbcommon-x11-0, libx11-6, libx11-xcb1, libxcb1, libxcursor1, libxrandr2, libxi6, libwayland-client0, libwayland-cursor0, libwayland-egl1
 Recommends: gnome-keyring | kwalletmanager | keepassxc, xdg-desktop-portal
 Suggests: postgresql-client, default-mysql-client, openssh-client
 Maintainer: OpenVClient contributors <maintainers@users.noreply.github.com>
@@ -179,7 +192,12 @@ Release:        1
 Summary:        ${SUMMARY}
 License:        MIT OR Apache-2.0
 URL:            https://github.com/Mrhudson69/openvclient
-Requires:       openssl-libs, libxkbcommon, mesa-libGL
+# Library sonames (distro-neutral) for what winit/glutin dlopen at start-up.
+Requires:       libssl.so.3()(64bit), libGL.so.1()(64bit), libEGL.so.1()(64bit)
+Requires:       libxkbcommon.so.0()(64bit), libxkbcommon-x11.so.0()(64bit)
+Requires:       libX11.so.6()(64bit), libX11-xcb.so.1()(64bit), libxcb.so.1()(64bit)
+Requires:       libXcursor.so.1()(64bit), libXrandr.so.2()(64bit), libXi.so.6()(64bit)
+Requires:       libwayland-client.so.0()(64bit), libwayland-cursor.so.0()(64bit), libwayland-egl.so.1()(64bit)
 Recommends:     gnome-keyring
 AutoReqProv:    no
 
