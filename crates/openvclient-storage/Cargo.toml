@@ -20,7 +20,7 @@ jiff = { version = "0.2", default-features = false, features = ["std"] }
 url = "2"
 hmac = "0.12"
 sha2 = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 futures-core = "0.3"
 bytes = "1"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
