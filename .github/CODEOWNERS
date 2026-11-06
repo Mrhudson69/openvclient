@@ -1,0 +1,45 @@
+# CODEOWNERS for OpenVClient
+# The last matching pattern wins. Owners listed here are requested for review
+# automatically, and (once the ruleset requires it) one of them must approve.
+# Roles and responsibilities: see GOVERNANCE.md.
+
+# Default: maintainers own everything not listed below
+*                                   @openvclient/maintainers
+
+# Core app, UI and shared abstractions
+/crates/openvclient-app/            @openvclient/core @openvclient/maintainers
+/crates/openvclient-core/           @openvclient/core @openvclient/maintainers
+/crates/openvclient-storage/        @openvclient/core @openvclient/maintainers
+/design-system/                     @openvclient/core @openvclient/maintainers
+/assets/                            @openvclient/core @openvclient/maintainers
+
+# Connectors
+/crates/openvclient-docker/         @openvclient/connectors @openvclient/maintainers
+/crates/openvclient-http/           @openvclient/connectors @openvclient/maintainers
+/crates/openvclient-mongo/          @openvclient/connectors @openvclient/maintainers
+/crates/openvclient-mysql/          @openvclient/connectors @openvclient/maintainers
+/crates/openvclient-postgres/       @openvclient/connectors @openvclient/maintainers
+/crates/openvclient-redis/          @openvclient/connectors @openvclient/maintainers
+/crates/openvclient-sqlite/         @openvclient/connectors @openvclient/maintainers
+/crates/openvclient-sqlserver/      @openvclient/connectors @openvclient/maintainers
+
+# Documentation
+/docs/                              @openvclient/docs @openvclient/maintainers
+/README.md                          @openvclient/docs @openvclient/maintainers
+/ROADMAP.md                         @openvclient/docs @openvclient/maintainers
+/CHANGELOG.md                       @openvclient/docs @openvclient/maintainers
+/CONTRIBUTING.md                    @openvclient/docs @openvclient/maintainers
+
+# Security-sensitive: networking/SSH/TLS, CI, release, installers, dependencies,
+# and project policy. Maintainers only.
+/crates/openvclient-net/            @openvclient/maintainers
+/.github/                           @openvclient/maintainers
+/installer/                         @openvclient/maintainers
+/scripts/                           @openvclient/maintainers
+/Cargo.toml                         @openvclient/maintainers
+/Cargo.lock                         @openvclient/maintainers
+/SECURITY.md                        @openvclient/maintainers
+/GOVERNANCE.md                      @openvclient/maintainers
+/CODE_OF_CONDUCT.md                 @openvclient/maintainers
+/LICENSE*                           @openvclient/maintainers
+/.github/CODEOWNERS                 @openvclient/maintainers
