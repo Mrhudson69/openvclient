@@ -119,7 +119,13 @@ jobs:
         run: codesign --force --deep --sign - dist/OpenVClient.app
       - name: Verify signature
         run: codesign --verify --deep --strict --verbose=2 dist/OpenVClient.app
+      # dmgbuild runs in a venv; pin Python so a runner image update cannot break it.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
       - name: Build drag-to-Applications .dmg and .zip
+        env:
+          DMG_PYTHON: python3.12
         run: |
           # Background, Applications shortcut, icon layout and volume icon (dmgbuild).
           SKIP_BUILD=1 APP=dist/OpenVClient.app DMG_ARCH=universal ./scripts/package-macos-dmg.sh

@@ -34,8 +34,17 @@ fi
 DMGBUILD=$(command -v dmgbuild || true)
 if [ -z "$DMGBUILD" ]; then
   VENV="target/dmg-venv"
+  # A stable Python, not whatever python3 is (runner images may ship a
+  # pre-release whose ensurepip fails). Override with DMG_PYTHON.
+  PY=${DMG_PYTHON:-}
+  if [ -z "$PY" ]; then
+    for c in python3.12 python3.13 python3.11 python3; do
+      if command -v "$c" >/dev/null; then PY=$(command -v "$c"); break; fi
+    done
+  fi
   if [ ! -x "$VENV/bin/dmgbuild" ]; then
-    python3 -m venv "$VENV"
+    rm -rf "$VENV"
+    "$PY" -m venv "$VENV"
     "$VENV/bin/pip" install --quiet "dmgbuild==1.6.5"
   fi
   DMGBUILD="$VENV/bin/dmgbuild"
