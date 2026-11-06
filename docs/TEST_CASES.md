@@ -224,7 +224,7 @@ Update ROADMAP.md before these become release-blocking.
 |---|---|---|---|---|---|---|
 | NET-001 | SSH password | SSH server on 52222 (`tunnel`/`tunnelpw`) that can reach the target | Network tab → SSH tunnel, password → connect to Postgres or Redis behind it | Connects. The tab label shows "Network · SSH tunnel". | `openvclient-net::tests::ssh_tunnel_password_key_and_pinning` | R |
 | NET-002 | SSH private key | Key authorised on the server | Key path (with `~` expansion), with and without a passphrase | Connects. A wrong passphrase gives an Auth error. | `ssh_tunnel_password_key_and_pinning` (with `OPENVCLIENT_TEST_SSH_KEY`) | R |
-| NET-003 | SSH agent | `ssh-agent` with the key loaded (`SSH_AUTH_SOCK`) | Auth = agent | Connects. Without an agent there is a clear error. | Manual (implemented, untested) | R |
+| NET-003 | SSH agent | macOS/Linux: `ssh-agent` with the key loaded (`SSH_AUTH_SOCK`). Windows: the OpenSSH `ssh-agent` service with `ssh-add`, or Pageant | Auth = agent | Connects. Without an agent there is a clear error (Windows: "No SSH agent is running. Start the OpenSSH Authentication Agent service … or run Pageant."). | Manual (implemented, untested) | R |
 | NET-004 | Host key TOFU | NET-001 on a fresh profile | First connect | The SHA-256 fingerprint is saved in the profile params (`SHA256:…`). | `ssh_tunnel_password_key_and_pinning` | R |
 | NET-005 | Host key changed | NET-004, then the server key is regenerated | Reconnect | The connection is **refused**. The error mentions the host key and the hint advises checking with the administrator. | `ssh_tunnel_password_key_and_pinning` | R |
 | NET-006 | SSH wrong password | NET-001 | Bad password | Auth error kind, with a hint that mentions the SSH login. | `ssh_tunnel_password_key_and_pinning` | |
@@ -302,9 +302,10 @@ Update ROADMAP.md before these become release-blocking.
 | UI-005 | Settings paths | — | Settings dialog | Shows the workspace file path and the logs path. Open logs folder opens Finder, Explorer or xdg-open. | Manual | R |
 | UI-006 | No emoji / raw hex | Code review | `grep` views for `Color32::from_rgb` and emoji | None. Icons come from `egui_material_icons`. | Manual (review) | |
 | UI-007 | Keyboard | — | ⌘N, ⌘T, ⌘W, ⌘⇧H, Esc in dialogs | Each works. On Windows and Linux, Ctrl replaces ⌘. | Manual | R |
-| UI-008 | HiDPI | Retina, 150% Windows scaling | Inspect | Text is crisp and the layout isn't clipped. Minimum window is 900×560. | Manual | R |
+| UI-008 | HiDPI | Retina, 150% Windows scaling | Inspect | Text is crisp and the layout isn't clipped. Minimum window is 1100×700; on smaller screens (e.g. 1280×720 logical) it is lowered to fit and the first window opens maximized. | Manual (`OPENVCLIENT_SHOTS_SIZE` for the walkthrough) | R |
 | UI-009 | Screen reader | AccessKit (VoiceOver, Narrator, Orca) | Navigate the sidebar and buttons | Controls have labels. | Manual | |
 | UI-010 | Home | Several profiles | Open Home (⌘⇧H) | Connection overview with health, quick actions and shortcuts. | `ui_walkthrough` | |
+| UI-011 | Terminal keys | SSH terminal tab | Type, Enter, arrows, Tab, Ctrl+C on a running `sleep 100`, Ctrl+X in nano, paste (Ctrl+V / ⌘V), resize the window | Each reaches the shell. On Windows and Linux Ctrl+C/Ctrl+X are sent to the shell, not used as copy/cut; "Copy screen" copies. | Manual | R |
 
 ## 19. Logging (LOG)
 
@@ -324,7 +325,7 @@ Run these on each release artefact. See [RELEASE_PLAN.md](RELEASE_PLAN.md).
 | PKG-001 | macOS .app launch | Downloaded universal `.dmg` | Mount, drag to Applications, open | No Gatekeeper block when notarised. With an ad-hoc build, right-click → Open works. The window title is OpenVClient. | Manual | R |
 | PKG-002 | macOS universal | PKG-001 | `lipo -archs OpenVClient.app/Contents/MacOS/OpenVClient` | `x86_64 arm64`. It runs under Rosetta and natively. | CI (release.yml) | R |
 | PKG-003 | macOS signature | PKG-001 | `codesign --verify --deep --strict -v` and `spctl -a -vv` | Valid. "Notarized Developer ID" when signed. | CI when secrets are set | R |
-| PKG-004 | Windows zip/MSI | Clean Windows 10/11 VM | Unzip and run, or install the MSI | Starts with no console window. SmartScreen shows the publisher when signed. | Manual | R |
+| PKG-004 | Windows zip/setup | Clean Windows 10/11 VM | Unzip and run, or run `OpenVClient-<v>-windows-x64-setup.exe` (for me / all users → Welcome → License → folder → Start menu → desktop shortcut → Ready → Finish with Launch) | Starts with no console window, with the app icon in the title bar and taskbar. Settings > Apps lists OpenVClient with icon, version and publisher. Installing a newer version over it upgrades in place. Uninstall removes the program and asks (default No) before deleting `%APPDATA%\OpenVClient`. SmartScreen shows the publisher when signed. | CI compiles the installer script; the rest is manual | R |
 | PKG-005 | Windows ARM64 | Windows on ARM | Run the aarch64 build | Starts natively. | Manual | |
 | PKG-006 | Linux tar.gz | Ubuntu 22.04/24.04, Fedora 40 | Extract and run `./openvclient` | Starts under X11 and Wayland. Missing Secret Service gives a clear error (KEY-005). | Manual | R |
 | PKG-007 | Linux .deb | Ubuntu | `sudo apt install ./openvclient_*.deb` | The desktop entry and icon appear. Dependencies resolve. | Manual | R |
@@ -332,3 +333,6 @@ Run these on each release artefact. See [RELEASE_PLAN.md](RELEASE_PLAN.md).
 | PKG-009 | GL fallback | VM without GPU (llvmpipe) | Launch | It renders (software GL), maybe slowly. No crash. | Manual | |
 | PKG-010 | Version | Any | Read the first log line or the About info | Matches the tag `vX.Y.Z`. | Manual | R |
 | PKG-011 | Feature builds | — | `cargo build -p openvclient-app --no-default-features --features sqlite` | Builds. Only SQLite is offered in the picker. | CI (could be added) | |
+| PKG-012 | Windows upgrade | An older version installed, app running | Run a newer setup.exe | Folder and Start menu pages are skipped, the earlier shortcut choice is kept, Restart Manager closes the running app, and Settings > Apps shows one entry with the new version. | CI (release.yml install smoke test) | R (Win) |
+| PKG-013 | Windows uninstall | PKG-004 | Uninstall from Settings > Apps | The program and its Apps entry go. The prompt about `%APPDATA%\OpenVClient` defaults to keeping it; a silent uninstall keeps it. | CI (silent path) + manual (prompt) | R (Win) |
+| PKG-014 | No OpenGL | Remote Desktop, a VM with the Basic Display Adapter, or an old driver | Launch | Starts through the Direct3D (WARP) fallback; the log records the retry. If both renderers fail, a message box explains why instead of exiting silently. | CI (hosted runners have no GPU) | R (Win) |

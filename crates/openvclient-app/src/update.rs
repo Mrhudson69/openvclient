@@ -97,15 +97,20 @@ pub async fn download(name: String, url: String) -> Result<std::path::PathBuf> {
     Ok(path)
 }
 
+/// Open a web page in the browser, or a local folder in the file manager.
 pub fn open_url(url: &str) {
-    let opener = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(windows) {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
-    let _ = std::process::Command::new(opener).arg(url).spawn();
+    #[cfg(windows)]
+    {
+        // explorer.exe falls back to "Documents" when a local path uses forward
+        // slashes (e.g. OPENVCLIENT_CONFIG_DIR=C:/ovc), so normalise them.
+        let target = if url.contains("://") { url.to_string() } else { url.replace('/', "\\") };
+        let _ = std::process::Command::new("explorer").arg(target).spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let _ = std::process::Command::new(opener).arg(url).spawn();
+    }
 }
 
 #[cfg(test)]

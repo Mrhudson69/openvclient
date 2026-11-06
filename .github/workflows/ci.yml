@@ -59,12 +59,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          # The minimal profile has no clippy, which the Windows step below needs.
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --workspace --all-targets
       # Live connector tests find no servers here and skip themselves.
       - name: Test
         run: cargo test --workspace -- --nocapture
+      # The clippy job runs on Linux, so #[cfg(windows)] code is linted here.
+      - name: Clippy (Windows-only code)
+        if: runner.os == 'Windows'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Installer script compiles
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\scripts\install-innosetup.ps1 -Dir "$env:RUNNER_TEMP\innosetup"
+          & "$env:RUNNER_TEMP\innosetup\ISCC.exe" /Qp "/DSourceExe=$PWD\target\debug\openvclient.exe" "/DOutputDir=$env:RUNNER_TEMP\installer" installer\windows\openvclient.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   test-linux-live:
     name: test (ubuntu-latest, live services)

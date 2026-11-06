@@ -8,7 +8,7 @@ This plan covers how OpenVClient is built, signed, versioned and shipped on macO
 |---|---|---|---|
 | macOS 11+ (Apple silicon + Intel) | `aarch64-apple-darwin`, `x86_64-apple-darwin` → `lipo` universal | `OpenVClient.app` in `OpenVClient-<v>-macos-universal.dmg` and `.zip` | 0.1 |
 | Windows 10/11 x86_64 | `x86_64-pc-windows-msvc` | `OpenVClient-<v>-windows-x86_64.zip` (portable `.exe`) | 0.1 |
-| Windows x86_64 installer | same | `OpenVClient-<v>-windows-x86_64.msi` (cargo-wix) **or** an Inno Setup `.exe` | 0.2 |
+| Windows x86_64 installer | same | `OpenVClient-<v>-windows-x64-setup.exe` (Inno Setup 6.6+, `installer/windows/openvclient.iss`) | 0.1 |
 | Windows 11 ARM64 | `aarch64-pc-windows-msvc` | zip + MSI | 0.3 |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` (glibc 2.35 baseline, built on Ubuntu 22.04) | `openvclient-<v>-linux-x86_64.tar.gz`, `openvclient_<v>_amd64.deb` | 0.1 |
 | Linux x86_64 extra formats | same | AppImage, `.rpm` (cargo-generate-rpm) | 0.2 |
@@ -52,7 +52,7 @@ The options, in order of preference for an OSS project:
 2. **Azure Trusted Signing** (paid per month, cheap): `azure/trusted-signing-action` with the secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `TRUSTED_SIGNING_ACCOUNT` and `TRUSTED_SIGNING_PROFILE`.
 3. A classic OV certificate in `WINDOWS_CERTIFICATE` (base64 `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` with `signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256`. **This is what `release.yml` implements today.**
 
-Sign `openvclient.exe` first, then the MSI.
+Sign `openvclient.exe` first, then the setup `.exe` (`scripts/bundle-windows.ps1` does both).
 
 ### Linux
 - Packages aren't signed individually at first. Users verify **`SHA256SUMS` signed with the project GPG key** (`GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`). The public key and its fingerprint are published in the README and on keys.openpgp.org.
@@ -67,13 +67,13 @@ Sign `openvclient.exe` first, then the MSI.
 | SQL Server Browser (named instances) | `sql-browser-tokio` | `sql-browser-tokio` | `sql-browser-tokio` |
 | TLS for PG/MySQL/Redis (`native-tls`) | Security.framework | SChannel | **OpenSSL** (`libssl3`/`openssl-libs` runtime dependency for deb/rpm). The AppImage bundles nothing and relies on the system libssl. |
 | TLS for SQL Server, HTTP connectors | rustls | rustls | rustls |
-| Renderer | eframe `glow` (OpenGL 3.2 core via CGL) | `glow` through WGL. Old Intel drivers may need the Mesa fallback. | `glow` via EGL/GLX, with X11 and Wayland both compiled in. |
-| GPU fallback | — | Ship `opengl32.dll` from Mesa (llvmpipe) as an opt-in in the portable zip, documented, if users report "no OpenGL" | Mesa llvmpipe works out of the box (PKG-009). |
-| wgpu | used only by `egui_kittest` in tests | same | same. Switching the app to `wgpu` (Metal/DX12/Vulkan) is an option once it's measured; it is not planned for 0.x. |
+| Renderer | eframe `glow` (OpenGL 3.2 core via CGL) | `glow` through WGL; when OpenGL 2+ is missing (Remote Desktop, VMs with the Basic Display Adapter, old drivers) the app retries with `wgpu` on Direct3D 12, which falls back to WARP software rendering. | `glow` via EGL/GLX, with X11 and Wayland both compiled in. |
+| GPU fallback | — | Built in: `wgpu` (D3D12 / WARP), compiled into Windows builds only. If both renderers fail, a dialog explains why instead of exiting silently. | Mesa llvmpipe works out of the box (PKG-009). |
+| wgpu | used only by `egui_kittest` in tests | renderer fallback (see above) and tests | same. Switching the app to `wgpu` (Metal/DX12/Vulkan) is an option once it's measured; it is not planned for 0.x. |
 | File dialogs (`rfd` 0.17) | NSOpenPanel | IFileDialog | **xdg-desktop-portal** (no GTK needed at build time) |
 | Console window | — | `windows_subsystem = "windows"` in release builds | — |
 | Config dir | `~/Library/Application Support/dev.OpenVClient.OpenVClient` | `%APPDATA%\OpenVClient\OpenVClient\config` | `~/.config/openvclient` |
-| External backup tools | `pg_dump`, `mysqldump` from Homebrew | Must be on `PATH` (not bundled) | distribution packages |
+| External backup tools | `pg_dump`, `mysqldump` from Homebrew | On `PATH` or in the installers' default folders (`Program Files\PostgreSQL\<v>in`, `MySQL\MySQL Server <v>in`, `MariaDB <v>in`); not bundled. Started without a console window. | distribution packages |
 | Docker | `/var/run/docker.sock` (Docker Desktop, Colima, OrbStack) | named pipe `//./pipe/docker_engine` | `/var/run/docker.sock` (the user is in the `docker` group) |
 
 We **don't bundle** `pg_dump`, `mysqldump` or the Azure CLI. They are found at runtime, and the matching actions are hidden when a tool is missing. That keeps the "never pretend" rule.
@@ -129,7 +129,7 @@ There is **no auto-update and no update check** before 1.0, which matches the no
 
 | Area | Linux x86_64 (CI) | macOS arm64 (CI) | macOS x86_64 | Windows x86_64 (CI) | Windows arm64 | Linux arm64 |
 |---|---|---|---|---|---|---|
-| `cargo fmt` / clippy | ✅ | — | — | — | — | — |
+| `cargo fmt` / clippy | ✅ | — | — | ✅ clippy | — | — |
 | Build + unit tests | ✅ | ✅ | M (Rosetta smoke) | ✅ | M | M |
 | SQLite end-to-end | ✅ | ✅ | — | ✅ | — | — |
 | Postgres / MySQL / Redis live | ✅ (service containers) | — (skips) | — | — (skips) | — | — |
@@ -140,6 +140,6 @@ There is **no auto-update and no update check** before 1.0, which matches the no
 | SQL Server `sql` + Entra auth | ✅ sql / M entra | M | — | M | — | — |
 | SQL Server `windows` / `integrated` | error path ✅ | error path ✅ | — | **M (only here)** | M | — |
 | Keychain backend | M (gnome-keyring + KWallet) | M | M | M | M | M |
-| Headless UI walkthrough | M (needs seeded workspace) | M | — | — | — | — |
+| Headless UI walkthrough | M (needs seeded workspace) | M | — | M | — | — |
 | Packaging smoke PKG-* | M | M | M | M | M | M |
 | HiDPI / Wayland / X11 | M (both) | M (Retina) | — | M (150%) | — | M |

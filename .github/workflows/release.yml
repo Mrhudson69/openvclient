@@ -6,8 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build, e.g. v0.1.0"
-        required: true
+        description: "Existing tag to (re)build, e.g. v0.1.0 (leave empty for a dry run of the selected branch)"
+        required: false
+      dry_run:
+        description: "Dry run: build, package and smoke-test only (no tag check, no release)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -15,6 +19,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
 
 jobs:
   version:
@@ -29,8 +34,8 @@ jobs:
       - id: v
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          echo "Cargo version: $version, tag: $TAG"
-          if [ "v$version" != "$TAG" ]; then
+          echo "Cargo version: $version, tag: $TAG, dry run: $DRY_RUN"
+          if [ "$DRY_RUN" != "true" ] && [ "v$version" != "$TAG" ]; then
             echo "::error::Tag $TAG does not match workspace version $version"
             exit 1
           fi
@@ -142,13 +147,22 @@ jobs:
   windows:
     name: Windows ${{ matrix.arch }}
     needs: version
+    # Both architectures build on x64: the runner's Visual Studio has the ARM64
+    # MSVC tools, and Inno Setup (32-bit) packages either.
     runs-on: windows-latest
+    # ARM64 has never been built or run on real hardware (RELEASE_PLAN
+    # milestone 0.3), so it must not block a release: it uploads artefacts
+    # when it works and is ignored when it does not.
+    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x86_64
             target: x86_64-pc-windows-msvc
+          - arch: aarch64
+            target: aarch64-pc-windows-msvc
+            experimental: true
     env:
       WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -161,9 +175,11 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       # Builds, Authenticode-signs when WINDOWS_CERTIFICATE is set, and zips.
+      # The installer script needs Inno Setup 6.6+ (dark mode, PNG wizard
+      # images). Pinned and hash-checked; added to PATH for the next step.
       - name: Install Inno Setup
         shell: pwsh
-        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+        run: .\scripts\install-innosetup.ps1 -Dir "$env:RUNNER_TEMP\innosetup"
       - name: Build installer and portable zip
         shell: pwsh
         run: .\scripts\bundle-windows.ps1 -Target ${{ matrix.target }}
@@ -175,21 +191,88 @@ jobs:
           name: windows-${{ matrix.arch }}
           path: |
             dist/*.zip
+            dist/*.zip.sha256
             dist/*-setup.exe
             dist/*-setup.exe.sha256
           if-no-files-found: error
 
+  # Install the setup.exe silently on a clean runner, launch it, then uninstall.
+  # Hosted runners have no GPU, so the launch also exercises the Direct3D
+  # (WARP) fallback for machines without OpenGL 2+.
+  windows-smoke:
+    name: Windows ${{ matrix.arch }} install smoke test
+    needs: windows
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            inno: x64
+            runner: windows-latest
+          - arch: aarch64
+            inno: arm64
+            runner: windows-11-arm
+            experimental: true
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-${{ matrix.arch }}
+          path: dist
+      - name: Install, launch, uninstall
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem "dist\*-windows-${{ matrix.inno }}-setup.exe" | Select-Object -First 1
+          $setupLog = Join-Path $env:RUNNER_TEMP "setup.log"
+          $p = Start-Process $setup.FullName -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/LOG=`"$setupLog`""
+          if ($p.ExitCode -ne 0) { Get-Content $setupLog; throw "Setup failed with exit code $($p.ExitCode)" }
+
+          $dir = Join-Path $env:LOCALAPPDATA "Programs\OpenVClient"
+          $exe = Join-Path $dir "OpenVClient.exe"
+          if (-not (Test-Path $exe)) { throw "Not installed: $exe" }
+          $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6B0F8C3E-4E57-4B7D-9A57-0E5C2D6F7A11}_is1"
+          $entry = Get-ItemProperty $uninstallKey
+          Write-Host "Apps entry: $($entry.DisplayName) $($entry.DisplayVersion), $($entry.Publisher), icon $($entry.DisplayIcon)"
+          if ($entry.DisplayName -ne "OpenVClient" -or -not $entry.DisplayVersion) { throw "Unexpected Apps entry" }
+          $shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\OpenVClient\OpenVClient.lnk"
+          if (-not (Test-Path $shortcut)) { throw "Start menu shortcut missing" }
+
+          $app = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 20
+          $log = Join-Path $env:APPDATA "OpenVClient\OpenVClient\config\logs\openvclient.log"
+          if (Test-Path $log) { Get-Content $log }
+          if ($app.HasExited) { throw "OpenVClient exited during start-up (exit code $($app.ExitCode))" }
+          if (-not $app.CloseMainWindow()) { Write-Warning "No main window to close; stopping the process"; Stop-Process -Id $app.Id -Force }
+          if (-not $app.WaitForExit(20000)) { Stop-Process -Id $app.Id -Force; throw "OpenVClient did not close" }
+
+          # Silent uninstall keeps user data (the default answer to the prompt).
+          Start-Process (Join-Path $dir "unins000.exe") -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          # The uninstaller re-runs itself from %TEMP%, so wait for the files to go.
+          for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw "Uninstall left $exe behind" }
+          if (Test-Path $uninstallKey) { throw "Uninstall left the Apps entry behind" }
+          if (-not (Test-Path (Join-Path $env:APPDATA "OpenVClient"))) { throw "Silent uninstall removed user data" }
+          Write-Host "Install, launch and uninstall OK"
+
   linux:
     name: Linux ${{ matrix.arch }}
     needs: version
-    # Oldest supported runner = glibc baseline for the binary.
-    runs-on: ubuntu-22.04
+    # Oldest supported runner = glibc baseline for the binary (2.35).
+    runs-on: ${{ matrix.runner }}
+    # See the Windows job: aarch64 is untested and never blocks a release.
+    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x86_64
             target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+            experimental: true
     steps:
       - uses: actions/checkout@v7
         with:
@@ -201,7 +284,7 @@ jobs:
             libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libx11-dev libgl1-mesa-dev file \
             rpm python3-pil desktop-file-utils libfuse2
           # appimagetool from a pinned release (add a sha256 check once the release hash is recorded).
-          APPIMAGETOOL_URL=https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          APPIMAGETOOL_URL=https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-${{ matrix.arch }}.AppImage
           curl -fsSL -o /tmp/appimagetool "$APPIMAGETOOL_URL"
           chmod +x /tmp/appimagetool
           echo "APPIMAGETOOL=/tmp/appimagetool" >> "$GITHUB_ENV"
@@ -228,9 +311,53 @@ jobs:
             dist/*.AppImage
           if-no-files-found: error
 
+  # Install the .deb on a clean, newer Ubuntu, start the app under Xvfb
+  # (Mesa llvmpipe), then remove the package.
+  linux-smoke:
+    name: Linux ${{ matrix.arch }} install smoke test
+    needs: linux
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            debarch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            debarch: arm64
+            runner: ubuntu-24.04-arm
+            experimental: true
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist
+      - name: Install, launch, remove
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth libgl1-mesa-dri
+          sudo apt-get install -y "./$(ls dist/openvclient_*_${{ matrix.debarch }}.deb)"
+          command -v openvclient
+          test -f /usr/share/applications/openvclient.desktop
+          dpkg -s openvclient | grep -E '^(Version|Architecture):'
+          # Still running after 20 s (timeout exits 124) means it started.
+          set +e
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 20 openvclient
+          code=$?
+          set -e
+          cat ~/.config/openvclient/logs/openvclient.log || true
+          if [ "$code" -ne 124 ]; then echo "::error::openvclient exited with $code during start-up"; exit 1; fi
+          sudo apt-get remove -y openvclient
+          if command -v openvclient; then echo "::error::openvclient still installed"; exit 1; fi
+          echo "Install, launch and removal OK"
+
   publish:
     name: Draft GitHub Release
-    needs: [version, macos, windows, linux]
+    needs: [version, macos, windows, windows-smoke, linux, linux-smoke]
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
     runs-on: ubuntu-latest
     env:
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}

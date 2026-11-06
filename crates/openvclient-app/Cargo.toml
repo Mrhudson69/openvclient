@@ -66,5 +66,14 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 [lints]
 workspace = true
 
+# Windows: a wgpu (Direct3D 12 / Vulkan / WARP) renderer as a fallback for
+# machines without OpenGL 2+, such as Remote Desktop sessions and VMs that
+# only have the Microsoft Basic Display Adapter. glow stays the default.
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["wgpu"] }
+# Close cleanly when Restart Manager (installers) or a logoff ends the app.
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Recovery", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

@@ -7,11 +7,12 @@ Outputs (committed, so builds do not need Pillow):
   assets/icon/openvclient.ico        Windows (16-256 px)
   assets/icon/openvclient-256.png    Linux desktop icon
   assets/installer/dmg-background.png      660x420 (+ @2x) DMG window
-  assets/installer/wizard-large.bmp       164x314 Inno Setup side image
-  assets/installer/wizard-small.bmp       55x58  Inno Setup header image
+  assets/installer/wizard-large-<w>x<h>.png  Inno Setup side image, one per DPI step
+  assets/installer/wizard-small-<n>.png      Inno Setup header icon, one per DPI step
 
 Colours follow design-system/openvclient/MASTER.md (slate + green accent).
 Run: python3 scripts/make-icons.py
+     python3 scripts/make-icons.py --windows-installer   (wizard images only)
 """
 
 import os
@@ -127,27 +128,44 @@ def dmg_background(scale=1):
     return img
 
 
-def wizard_large():
-    W, H = 164, 314
+# Inno Setup 6.6+ image areas at 100/125/150/200/250 % DPI (default font and
+# WizardSizePercent). Setup picks the closest file, so text stays sharp.
+WIZARD_LARGE_SIZES = [(202, 386), (269, 515), (336, 643), (430, 824), (534, 1022)]
+WIZARD_SMALL_SIZES = [58, 77, 97, 124, 159]
+
+
+def wizard_large(W=202, H=386):
+    """Welcome/Finish side panel: dark slate in both light and dark wizards."""
+    s = W / 202
     img = vertical_gradient((W, H), SLATE_800, SLATE_950).convert("RGBA")
-    ic = icon_master(256).resize((112, 112), Image.LANCZOS)
-    img.alpha_composite(ic, ((W - 112) // 2, 70))
+    ic_size = int(132 * s)
+    ic = icon_master(1024).resize((ic_size, ic_size), Image.LANCZOS)
+    img.alpha_composite(ic, ((W - ic_size) // 2, int(92 * s)))
     d = ImageDraw.Draw(img)
-    d.text((W / 2, 210), "OpenVClient", fill=SLATE_100, font=font(17, True), anchor="mm")
-    d.text((W / 2, 232), "Databases & infrastructure", fill=SLATE_400, font=font(10), anchor="mm")
+    d.text((W / 2, 258 * s), "OpenVClient", fill=SLATE_100, font=font(int(21 * s), True), anchor="mm")
+    d.text((W / 2, 284 * s), "Databases & infrastructure", fill=SLATE_400, font=font(int(12 * s)), anchor="mm")
     return img.convert("RGB")
 
 
-def wizard_small():
-    img = Image.new("RGBA", (55, 58), (255, 255, 255, 255))
-    ic = icon_master(256).resize((50, 50), Image.LANCZOS)
-    img.alpha_composite(ic, (2, 4))
-    return img.convert("RGB")
+def wizard_small(S=58):
+    """Header icon. Transparent, so it sits on the light or dark top panel."""
+    return icon_master(1024).resize((S, S), Image.LANCZOS)
+
+
+def windows_wizard_images():
+    for w, h in WIZARD_LARGE_SIZES:
+        wizard_large(w, h).save(os.path.join(INST_DIR, f"wizard-large-{w}x{h}.png"), optimize=True)
+    for s in WIZARD_SMALL_SIZES:
+        wizard_small(s).save(os.path.join(INST_DIR, f"wizard-small-{s}.png"), optimize=True)
 
 
 def main():
     os.makedirs(ICON_DIR, exist_ok=True)
     os.makedirs(INST_DIR, exist_ok=True)
+    if "--windows-installer" in sys.argv:
+        windows_wizard_images()
+        print("Inno Setup wizard images written to assets/installer/")
+        return
     master = icon_master(1024)
     master.save(os.path.join(ICON_DIR, "openvclient.png"))
     master.resize((256, 256), Image.LANCZOS).save(os.path.join(ICON_DIR, "openvclient-256.png"))
@@ -166,8 +184,7 @@ def main():
 
     dmg_background(1).save(os.path.join(INST_DIR, "dmg-background.png"))
     dmg_background(2).save(os.path.join(INST_DIR, "dmg-background@2x.png"))
-    wizard_large().save(os.path.join(INST_DIR, "wizard-large.bmp"))
-    wizard_small().save(os.path.join(INST_DIR, "wizard-small.bmp"))
+    windows_wizard_images()
     print("icons and installer artwork written to assets/")
 
 

@@ -49,8 +49,12 @@ fn d_err(e: bollard::errors::Error) -> Error {
         }
         other => {
             let m = other.to_string();
-            if m.contains("connect") || m.contains("No such file") || m.contains("refused") || m.contains("socket") {
-                Error::connection(format!("{m}. Is the Docker daemon running?"))
+            let lower = m.to_ascii_lowercase();
+            // Windows reports a missing named pipe as "client error (Connect)" or
+            // "The system cannot find the file specified" (os error 2).
+            if ["connect", "no such file", "cannot find the file", "refused", "socket", "pipe"].iter().any(|k| lower.contains(k)) {
+                let hint = if cfg!(windows) { "Is Docker Desktop running? It serves the Docker API on \\\\.\\pipe\\docker_engine." } else { "Is the Docker daemon running?" };
+                Error::connection(format!("{m}. {hint}"))
             } else {
                 Error::other(m)
             }

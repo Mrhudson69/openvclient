@@ -159,7 +159,10 @@ async fn managed_identity(client_id: Option<&str>, resource: &str) -> Result<(St
 async fn azure_cli(resource: &str) -> Result<(String, u64)> {
     #[allow(non_snake_case)]
     let RESOURCE = resource;
-    let out = tokio::process::Command::new("az")
+    // On Windows the Azure CLI is a batch file (az.cmd); Command only adds
+    // ".exe" when it searches PATH, so name the .cmd explicitly.
+    let az = if cfg!(windows) { "az.cmd" } else { "az" };
+    let out = openvclient_core::process::command(az)
         .args(["account", "get-access-token", "--resource", RESOURCE, "--output", "json"])
         .output()
         .await
