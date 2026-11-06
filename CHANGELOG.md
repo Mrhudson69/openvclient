@@ -4,6 +4,20 @@ All notable changes to OpenVClient are listed here. The project follows
 [Semantic Versioning](https://semver.org); pre-releases are tagged
 `vX.Y.Z-beta.N` and published as GitHub pre-releases.
 
+## [1.0.0-beta.3] — 2026-11-06
+
+Notes: [docs/release-notes/v1.0.0-beta.3.md](docs/release-notes/v1.0.0-beta.3.md).
+
+### Added
+- File manager for Azure Blob, S3 and S3-compatible storage, FTP/FTPS and SFTP: breadcrumb navigation with back/forward/up, sortable file list, multi-select, upload (button and drag and drop), new folder, download, share link, rename, delete, right-click menu and preview panel.
+- About panel with version, Check for updates and project links; version shown in Settings.
+- "Vee" logo and brand assets; new app icon and installer artwork.
+- Readable labels in all dropdowns.
+
+### Fixed
+- Storage connections no longer show "localhost".
+- Connector tiles are fully clickable.
+
 ## [1.0.0-beta.2] — 2026-11-06
 
 Notes: [docs/release-notes/v1.0.0-beta.2.md](docs/release-notes/v1.0.0-beta.2.md).
@@ -33,5 +47,6 @@ First public beta. Full notes: [docs/release-notes/v1.0.0-beta.1.md](docs/releas
 - SSH host keys verified against known_hosts or confirmed by the user before first use.
 - See docs/SECURITY_AUDIT.md for the audit and fixes.
 
+[1.0.0-beta.3]: https://github.com/Mrhudson69/openvclient/releases/tag/v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/Mrhudson69/openvclient/releases/tag/v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/Mrhudson69/openvclient/releases/tag/v1.0.0-beta.1
