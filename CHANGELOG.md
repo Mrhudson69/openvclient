@@ -4,6 +4,25 @@ All notable changes to OpenVClient are listed here. The project follows
 [Semantic Versioning](https://semver.org); pre-releases are tagged
 `vX.Y.Z-beta.N` and published as GitHub pre-releases.
 
+## [1.0.0-beta.4] — 2026-11-06
+
+Notes: [docs/release-notes/v1.0.0-beta.4.md](docs/release-notes/v1.0.0-beta.4.md).
+
+### Added
+- Cartoon style (Settings → Appearance → Style), with connector stickers and cartoon icons for folders, containers, databases, tables, files and tabs; Mode (System/Dark/Light) is a separate setting.
+- Favourite connections, pinned at the top of Home.
+- Keyboard shortcuts window (⌘/, Settings → Help, About).
+- GaussDB / openGauss support end to end.
+
+### Fixed
+- SSH "Password" login on PAM servers (Ubuntu, Linux Mint): falls back to keyboard-interactive.
+- Connected storage and service connections open their own view instead of the Docker view.
+- Long sidebar error messages no longer widen the panel.
+- The workspace encryption key is never replaced when the keychain can't be read (a locked keychain or a denied prompt could make saved history unreadable).
+
+### Changed
+- The project moved to https://github.com/openvclient/openvclient.
+
 ## [1.0.0-beta.3] — 2026-11-06
 
 Notes: [docs/release-notes/v1.0.0-beta.3.md](docs/release-notes/v1.0.0-beta.3.md).
@@ -47,6 +66,7 @@ First public beta. Full notes: [docs/release-notes/v1.0.0-beta.1.md](docs/releas
 - SSH host keys verified against known_hosts or confirmed by the user before first use.
 - See docs/SECURITY_AUDIT.md for the audit and fixes.
 
-[1.0.0-beta.3]: https://github.com/Mrhudson69/openvclient/releases/tag/v1.0.0-beta.3
-[1.0.0-beta.2]: https://github.com/Mrhudson69/openvclient/releases/tag/v1.0.0-beta.2
-[1.0.0-beta.1]: https://github.com/Mrhudson69/openvclient/releases/tag/v1.0.0-beta.1
+[1.0.0-beta.4]: https://github.com/openvclient/openvclient/releases/tag/v1.0.0-beta.4
+[1.0.0-beta.3]: https://github.com/openvclient/openvclient/releases/tag/v1.0.0-beta.3
+[1.0.0-beta.2]: https://github.com/openvclient/openvclient/releases/tag/v1.0.0-beta.2
+[1.0.0-beta.1]: https://github.com/openvclient/openvclient/releases/tag/v1.0.0-beta.1

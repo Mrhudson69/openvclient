@@ -1829,4 +1829,125 @@ mod walkthrough {
         drop(h);
         rt.shutdown_timeout(Duration::from_secs(1));
     }
+
+    /// README screenshots on neutral demo data (scratch workspace, demo SQLite
+    /// copied to /tmp/openvclient-demo so no personal paths show):
+    /// `OPENVCLIENT_CONFIG_DIR=<empty dir> OPENVCLIENT_SHOTS=<out> cargo test -p openvclient-app readme_screenshots -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn readme_screenshots() {
+        use openvclient_core::sql::{ObjPath, ObjectKind};
+        use openvclient_core::{ConnectionProfile, Environment};
+        let out = std::path::PathBuf::from(std::env::var("OPENVCLIENT_SHOTS").expect("set OPENVCLIENT_SHOTS"));
+        std::fs::create_dir_all(&out).unwrap();
+        let demo = std::path::Path::new("/tmp/openvclient-demo");
+        std::fs::create_dir_all(demo).unwrap();
+        let db = demo.join("shop.db");
+        std::fs::copy(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/shop.db"), &db).expect("demo/shop.db");
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let handle = rt.handle().clone();
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_pixels_per_point(1.5).with_max_steps(64).build_eframe(move |cc| {
+            theme::install(&cc.egui_ctx);
+            OpenvApp::new(&cc.egui_ctx, handle, crate::registry())
+        });
+        let mut shop = ConnectionProfile::new("sqlite", "Shop (SQLite demo)");
+        shop.params.insert("path".into(), db.display().to_string());
+        shop.folder = "Demo".into();
+        let shop_id = shop.id;
+        let mut all = vec![shop];
+        for (driver, name, env, folder) in [
+            ("postgres", "Orders DB", Environment::Staging, "Demo"),
+            ("mysql", "Billing", Environment::Production, "Demo"),
+            ("redis", "Session cache", Environment::Development, "Demo"),
+            ("mongodb", "Events", Environment::Testing, "Demo"),
+            ("s3", "Media bucket", Environment::Production, "Cloud"),
+            ("azure_blob", "Analytics exports", Environment::Production, "Cloud"),
+            ("ssh", "bastion-01", Environment::Production, "Servers"),
+            ("docker", "Local Docker", Environment::Development, "Servers"),
+        ] {
+            let mut p = ConnectionProfile::new(driver, name);
+            p.environment = env;
+            p.folder = folder.into();
+            match driver {
+                "postgres" => {
+                    p.params.insert("host".into(), "db.staging.example.com".into());
+                    p.params.insert("user".into(), "app".into());
+                    p.params.insert("database".into(), "orders".into());
+                }
+                "mysql" => {
+                    p.params.insert("host".into(), "billing.example.com".into());
+                    p.params.insert("user".into(), "report".into());
+                }
+                "redis" => {
+                    p.params.insert("host".into(), "cache.example.com".into());
+                }
+                "mongodb" => {
+                    p.params.insert("host".into(), "events.example.com".into());
+                }
+                "ssh" => {
+                    p.params.insert("host".into(), "bastion.example.com".into());
+                    p.params.insert("user".into(), "ops".into());
+                }
+                _ => {}
+            }
+            all.push(p);
+        }
+        let pinned = [all[0].id, all[1].id, all[6].id];
+        {
+            let app = h.state_mut();
+            app.cx.store.ws.profiles = all;
+            for id in pinned {
+                app.cx.store.toggle_favorite(id);
+            }
+        }
+        let style = |h: &mut Harness<'_, OpenvApp>, cartoon: bool, dark: bool| {
+            theme::set_cartoon(&h.ctx, cartoon);
+            h.ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
+        };
+
+        style(&mut h, false, true);
+        shot(&mut h, &out, "home-original-dark");
+        style(&mut h, true, false);
+        shot(&mut h, &out, "home-cartoon-light");
+
+        h.state_mut().cx.cmd(Cmd::Connect(shop_id));
+        settle(&mut h, |a| a.cx.conns.is_connected(shop_id), Duration::from_secs(10));
+        let sql = "-- Revenue by country, shipped orders only\nSELECT c.country,\n       count(*)               AS orders,\n       round(sum(o.total), 2) AS revenue,\n       round(avg(o.total), 2) AS avg_order\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nWHERE o.status = 'shipped'\nGROUP BY c.country\nORDER BY revenue DESC;";
+        h.state_mut().cx.cmd(Cmd::NewSql { conn: shop_id, database: None, text: sql.into() });
+        for _ in 0..10 {
+            h.step();
+        }
+        h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Enter);
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        style(&mut h, false, true);
+        shot(&mut h, &out, "sql-original-dark");
+        style(&mut h, false, false);
+        shot(&mut h, &out, "sql-original-light");
+
+        h.state_mut().cx.cmd(Cmd::OpenTable { conn: shop_id, kind: ObjectKind::Table, path: ObjPath::default().with_schema("main").with_name("orders") });
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        style(&mut h, true, true);
+        shot(&mut h, &out, "table-cartoon-dark");
+
+        {
+            let cx = &h.state().cx;
+            let d = views::conn_dialog::ConnDialog::new(cx, None, None);
+            h.state_mut().cx.conn_dialog = Some(d);
+        }
+        style(&mut h, true, false);
+        shot(&mut h, &out, "picker-cartoon-light");
+        h.state_mut().cx.conn_dialog = None;
+        h.state_mut().cx.show_settings = true;
+        style(&mut h, false, true);
+        shot(&mut h, &out, "settings-original-dark");
+        h.state_mut().cx.show_settings = false;
+        h.state_mut().cx.show_shortcuts = true;
+        style(&mut h, true, false);
+        shot(&mut h, &out, "shortcuts-cartoon-light");
+        drop(h);
+        rt.shutdown_timeout(Duration::from_secs(1));
+    }
 }

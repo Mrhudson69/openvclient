@@ -4606,7 +4606,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-app"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -4651,7 +4651,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-core"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4668,7 +4668,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-docker"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "bollard",
@@ -4682,7 +4682,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-http"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "openvclient-core",
@@ -4694,7 +4694,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-mongo"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "futures",
@@ -4706,7 +4706,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-mysql"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "futures",
@@ -4719,7 +4719,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-net"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "base64 0.23.1",
  "openvclient-core",
@@ -4733,7 +4733,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-postgres"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "deadpool-postgres",
@@ -4750,7 +4750,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-redis"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "openvclient-core",
@@ -4760,7 +4760,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-sqlite"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "openvclient-core",
@@ -4771,7 +4771,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-sqlserver"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4789,7 +4789,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-storage"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-trait",
  "base64 0.23.1",

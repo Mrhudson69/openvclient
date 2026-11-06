@@ -24,6 +24,11 @@ fn b64() -> base64::engine::GeneralPurpose {
 /// store is unavailable (then data stays as it was, and a warning is logged).
 fn key() -> Option<[u8; 32]> {
     *KEY.get_or_init(|| {
+        // Tests (including the screenshot walkthroughs) never touch the real
+        // credential store: they would prompt, and could replace the user's key.
+        if cfg!(test) {
+            return Some([7u8; 32]);
+        }
         let entry = match keyring::Entry::new(crate::store::KEYCHAIN_SERVICE, KEY_ACCOUNT) {
             Ok(e) => e,
             Err(e) => {
@@ -31,13 +36,26 @@ fn key() -> Option<[u8; 32]> {
                 return None;
             }
         };
-        if let Ok(existing) = entry.get_password()
-            && let Ok(bytes) = b64().decode(existing.trim())
-            && bytes.len() == 32
-        {
-            let mut k = [0u8; 32];
-            k.copy_from_slice(&bytes);
-            return Some(k);
+        match entry.get_password() {
+            Ok(existing) => {
+                if let Ok(bytes) = b64().decode(existing.trim())
+                    && bytes.len() == 32
+                {
+                    let mut k = [0u8; 32];
+                    k.copy_from_slice(&bytes);
+                    return Some(k);
+                }
+                // Never replace a key that exists: that would make everything
+                // sealed with it unreadable.
+                tracing::warn!(target: "openvclient", "the workspace key in the credential store is unreadable; history stays as it is");
+                return None;
+            }
+            Err(keyring::Error::NoEntry) => {} // first run: create the key below
+            Err(e) => {
+                // Locked store, denied prompt…: try again next launch, never overwrite.
+                tracing::warn!(target: "openvclient", "could not read the workspace key, history is not encrypted this session: {e}");
+                return None;
+            }
         }
         let mut k = [0u8; 32];
         getrandom::getrandom(&mut k).ok()?;

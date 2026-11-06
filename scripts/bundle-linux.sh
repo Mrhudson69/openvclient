@@ -194,7 +194,7 @@ Version:        ${PKGVER}
 Release:        1
 Summary:        ${SUMMARY}
 License:        MIT OR Apache-2.0
-URL:            https://github.com/Mrhudson69/openvclient
+URL:            https://github.com/openvclient/openvclient
 # Library sonames (distro-neutral) for what winit/glutin dlopen at start-up.
 Requires:       libssl.so.3()(64bit), libGL.so.1()(64bit), libEGL.so.1()(64bit)
 Requires:       libxkbcommon.so.0()(64bit), libxkbcommon-x11.so.0()(64bit)
