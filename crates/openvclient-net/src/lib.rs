@@ -399,28 +399,20 @@ pub async fn ssh_connect_via(jump: Option<&client::Handle<HostKeyCheck>>, t: &Ss
     let user = t.user.as_str();
     let ce = |e: russh::Error| Error::connection(e.to_string());
     let load = |path: &std::path::Path, pass: Option<&str>| russh::keys::load_secret_key(path, pass).map_err(|e| Error::invalid(format!("Could not load private key {}: {e}", path.display())));
+    // Methods the server said it accepts after a failed attempt, for the error message.
+    let mut offered: Option<Vec<String>> = None;
     let ok = match &t.auth {
         SshAuth::None => session.authenticate_none(user).await.map_err(ce)?.success(),
-        SshAuth::Password(p) => session.authenticate_password(user, p).await.map_err(ce)?.success(),
-        SshAuth::KeyboardInteractive { password, otp } => {
-            use client::KeyboardInteractiveAuthResponse as K;
-            let mut r = session.authenticate_keyboard_interactive_start(user, None).await.map_err(ce)?;
-            let mut rounds = 0;
-            loop {
-                match r {
-                    K::Success => break true,
-                    K::Failure { .. } => break false,
-                    K::InfoRequest { prompts, .. } => {
-                        rounds += 1;
-                        if rounds > 8 {
-                            break false;
-                        }
-                        let answers = prompts.iter().map(|p| if p.prompt.to_lowercase().contains("pass") { password.clone() } else { otp.clone().unwrap_or_else(|| password.clone()) }).collect();
-                        r = session.authenticate_keyboard_interactive_respond(answers).await.map_err(ce)?;
-                    }
-                }
+        SshAuth::Password(p) => match session.authenticate_password(user, p).await.map_err(ce)? {
+            russh::client::AuthResult::Success => true,
+            russh::client::AuthResult::Failure { remaining_methods, .. } => {
+                offered = Some(remaining_methods.iter().map(|m| <&str>::from(m).to_string()).collect());
+                // Like OpenSSH: many servers (PAM, e.g. Ubuntu and Mint) take the
+                // password only through keyboard-interactive, so retry that way.
+                if remaining_methods.contains(&russh::MethodKind::KeyboardInteractive) { keyboard_interactive(&mut session, user, p, None).await? } else { false }
             }
-        }
+        },
+        SshAuth::KeyboardInteractive { password, otp } => keyboard_interactive(&mut session, user, password, otp.as_deref()).await?,
         SshAuth::Key { path, passphrase } => {
             let key = load(path, passphrase.as_deref())?;
             let hash = session.best_supported_rsa_hash().await.map_err(ce)?.flatten();
@@ -439,9 +431,32 @@ pub async fn ssh_connect_via(jump: Option<&client::Handle<HostKeyCheck>>, t: &Ss
         SshAuth::Agent => agent_auth(&mut session, user).await?,
     };
     if !ok {
-        return Err(Error::auth(format!("SSH authentication failed for {user}@{host} ({:?})", t.auth)));
+        let methods = match offered {
+            Some(m) if !m.is_empty() => format!(". The server accepts: {}", m.join(", ")),
+            _ => String::new(),
+        };
+        return Err(Error::auth(format!("SSH authentication failed for {user}@{host} ({:?}){methods}", t.auth)));
     }
     Ok((session, fingerprint))
+}
+
+/// Keyboard-interactive login: password prompts get the password, other
+/// prompts (one-time codes) get `otp`, or the password when there is none.
+async fn keyboard_interactive(session: &mut client::Handle<HostKeyCheck>, user: &str, password: &str, otp: Option<&str>) -> Result<bool> {
+    use client::KeyboardInteractiveAuthResponse as K;
+    let ce = |e: russh::Error| Error::connection(e.to_string());
+    let mut r = session.authenticate_keyboard_interactive_start(user, None).await.map_err(ce)?;
+    for _ in 0..8 {
+        match r {
+            K::Success => return Ok(true),
+            K::Failure { .. } => return Ok(false),
+            K::InfoRequest { prompts, .. } => {
+                let answers = prompts.iter().map(|p| if p.prompt.to_lowercase().contains("pass") { password.to_string() } else { otp.unwrap_or(password).to_string() }).collect();
+                r = session.authenticate_keyboard_interactive_respond(answers).await.map_err(ce)?;
+            }
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(unix)]

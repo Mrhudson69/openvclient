@@ -300,7 +300,8 @@ fn connection_row(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile, ind
         let msg = e.message.clone();
         ui.horizontal(|ui| {
             ui.add_space(indent + 42.0);
-            ui.label(RichText::new(msg).small().color(t.destructive)).on_hover_text("Double-click the connection to retry");
+            // Truncated to the panel width: a long message must not widen the sidebar.
+            ui.add(egui::Label::new(RichText::new(&msg).small().color(t.destructive)).truncate()).on_hover_text(format!("{msg}\n\nDouble-click the connection to retry"));
         });
     }
     if let Some(ConnState::Connecting { started, .. }) = cx.conns.state(id) {
@@ -464,7 +465,7 @@ fn kv_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, indent: f32) {
         }
         Some(KvChildren::Failed(e)) => {
             let e = e.clone();
-            ui.label(RichText::new(e).small().color(t.destructive));
+            ui.add(egui::Label::new(RichText::new(e.clone()).small().color(t.destructive)).truncate()).on_hover_text(e.clone());
         }
         _ => {
             ui.horizontal(|ui| {
@@ -502,7 +503,7 @@ fn sql_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, parent: Option<(Ob
             let e = e.clone();
             ui.horizontal(|ui| {
                 ui.add_space(indent + 20.0);
-                ui.label(RichText::new(e).small().color(t.destructive));
+                ui.add(egui::Label::new(RichText::new(e.clone()).small().color(t.destructive)).truncate()).on_hover_text(e.clone());
                 if ui.small_button("Retry").clicked() {
                     cx.sidebar.children.remove(&ck);
                 }
@@ -771,7 +772,7 @@ fn resource_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, parent: Optio
             let e = e.clone();
             ui.horizontal(|ui| {
                 ui.add_space(indent + 20.0);
-                ui.label(RichText::new(e).small().color(t.destructive));
+                ui.add(egui::Label::new(RichText::new(e.clone()).small().color(t.destructive)).truncate()).on_hover_text(e.clone());
                 if ui.small_button("Retry").clicked() {
                     cx.sidebar.res.remove(&key);
                 }

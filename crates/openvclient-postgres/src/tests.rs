@@ -166,3 +166,82 @@ async fn live_postgres() {
     s.close().await;
     admin.drop_object(ObjectKind::Database, &ObjPath::db("openvclient_test"), true).await.unwrap();
 }
+
+/// openGauss / GaussDB through the GaussDB flavour of the driver:
+/// `docker run -d --name ovc-gauss --privileged -e GS_PASSWORD='Ovc@pass123' -p 55432:5432 opengauss/opengauss-server`
+#[tokio::test]
+async fn live_opengauss() {
+    let driver = PostgresDriver::flavor("gaussdb", "GaussDB / openGauss", "", "5432", "gaussdb", "postgres");
+    let mut v = BTreeMap::new();
+    v.insert("host".into(), "127.0.0.1".into());
+    v.insert("port".into(), std::env::var("OPENVCLIENT_GAUSS_PORT").unwrap_or_else(|_| "55432".into()));
+    v.insert("user".into(), "gaussdb".into());
+    v.insert("database".into(), "postgres".into());
+    v.insert("sslmode".into(), "disable".into());
+    let p = ConnectParams { values: v, secret: Some("Ovc@pass123".into()), read_only: false, notifier: None };
+    let h = match driver.connect(p).await {
+        Ok(h) => h,
+        Err(e) if e.message.contains("refused") || e.message.contains("timed out") || e.message.contains("reach") => {
+            eprintln!("skipping: no openGauss reachable ({})", e.message);
+            return;
+        }
+        Err(e) => panic!("openGauss connect failed: {} {:?}", e.message, e.detail),
+    };
+    let s = h.sql().unwrap().clone();
+    eprintln!("server: {:?}", h.base().server_info().version);
+    let _ = s.run(None, "DROP SCHEMA IF EXISTS ovc_app CASCADE").await;
+    s.run(None, "CREATE SCHEMA ovc_app; CREATE TABLE ovc_app.users(id int PRIMARY KEY, name text NOT NULL, score numeric(6,2)); CREATE VIEW ovc_app.v AS SELECT name FROM ovc_app.users; CREATE INDEX users_name_idx ON ovc_app.users(name);")
+        .await
+        .unwrap();
+    s.run(None, "INSERT INTO ovc_app.users VALUES (1, 'ada', 9.5), (2, 'bob', NULL)").await.unwrap();
+    let c = s.open_console(None).await.unwrap();
+    let res = c.execute(vec!["SELECT id, name, score FROM ovc_app.users ORDER BY id".into()], ExecOptions { max_rows: 10 }).await;
+    let Ok(StatementOutcome::Rows(rs)) = &res[0].outcome else { panic!("{:?}", res[0].outcome) };
+    assert_eq!(rs.rows.len(), 2);
+    assert_eq!(rs.rows[0][1], Value::Text("ada".into()));
+
+    // Object browser: databases, schemas, tables, views; DDL.
+    let dbs = s.children(None).await.unwrap();
+    assert!(dbs.iter().any(|d| d.label == "postgres"), "databases: {:?}", dbs.iter().map(|d| &d.label).collect::<Vec<_>>());
+    let schemas = s.children(Some((ObjectKind::Database, ObjPath::db("postgres")))).await.unwrap();
+    assert!(schemas.iter().any(|n| n.label == "ovc_app"));
+    let app = ObjPath::db("postgres").with_schema("ovc_app");
+    let tables = s.children(Some((ObjectKind::Folder(FolderKind::Tables), app.clone()))).await.unwrap();
+    assert_eq!(tables.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), vec!["users"]);
+    let views = s.children(Some((ObjectKind::Folder(FolderKind::Views), app.clone()))).await.unwrap();
+    assert!(views.iter().any(|n| n.label == "v"));
+    let ddl = s.ddl(ObjectKind::Table, &app.clone().with_name("users")).await.unwrap();
+    assert!(ddl.to_lowercase().contains("create table"), "{ddl}");
+    let users = app.clone().with_name("users");
+
+    // Table data browser and editing.
+    let page = s.table_page(TableQuery { path: users.clone(), filter: Some("id > 0".into()), order_by: vec![("name".into(), SortDir::Desc)], limit: 50, offset: 0 }).await.unwrap();
+    assert_eq!(page.key_columns, vec!["id"]);
+    assert_eq!(page.rows.rows[0][1], Value::Text("bob".into()));
+    s.apply_changes(&users, vec![RowChange::Insert { values: vec![("id".into(), Some("3".into())), ("name".into(), Some("cy".into()))] }]).await.unwrap();
+    assert_eq!(s.count_rows(&users, None).await.unwrap(), 3);
+    assert!(!s.columns(&users).await.unwrap().is_empty());
+
+    // Functions, EXPLAIN, monitoring, users and grants, autocomplete catalog.
+    s.run(None, "CREATE FUNCTION ovc_app.add(a int, b int) RETURNS int LANGUAGE sql AS 'SELECT a + b'").await.unwrap();
+    let funcs = s.children(Some((ObjectKind::Folder(FolderKind::Functions), app.clone()))).await.unwrap();
+    assert!(funcs.iter().any(|f| f.label.starts_with("add")), "functions: {:?}", funcs.iter().map(|f| &f.label).collect::<Vec<_>>());
+    let plan = c.explain("SELECT * FROM ovc_app.users WHERE id = 1", false).await.unwrap();
+    assert!(plan.tree.is_some(), "no plan tree");
+    let act = s.activity().await.unwrap();
+    assert!(!act.rows.rows.is_empty());
+    s.locks().await.unwrap();
+    assert!(!s.metrics().await.unwrap().is_empty());
+    assert!(!s.principals().await.unwrap().rows.is_empty());
+    let _ = s.drop_principal("ovc_test_role", None).await;
+    s.create_principal(PrincipalSpec { name: "ovc_test_role".into(), password: Some("Ovc@role123".into()), can_login: true, ..Default::default() }).await.unwrap();
+    s.grant(GrantSpec { privileges: vec!["SELECT".into()], target: GrantTarget::Table(users.clone()), principal: "ovc_test_role".into(), host: None, with_grant_option: false }, false).await.unwrap();
+    let privs = s.privileges("ovc_test_role", None).await.unwrap();
+    assert!(privs.rows.iter().any(|r| r[1] == Value::Text("ovc_app.users".into())), "{:?}", privs.rows);
+    s.grant(GrantSpec { privileges: vec!["SELECT".into()], target: GrantTarget::Table(users.clone()), principal: "ovc_test_role".into(), host: None, with_grant_option: false }, true).await.unwrap();
+    s.drop_principal("ovc_test_role", None).await.unwrap();
+    let cat = s.catalog(None).await.unwrap();
+    assert!(cat.columns.get("users").is_some_and(|c| c.contains(&"score".to_string())));
+    c.close().await;
+    s.run(None, "DROP SCHEMA ovc_app CASCADE").await.unwrap();
+}
