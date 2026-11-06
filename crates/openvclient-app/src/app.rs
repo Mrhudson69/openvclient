@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::bg::{Bg, Job};
 use crate::conns::{ConnEvent, ConnState, Connections};
-use crate::store::{Store, ThemeChoice};
+use crate::store::{Store, ThemeChoice, ThemeStyle};
 use crate::theme::{self, ico};
 use crate::views;
 use crate::widgets::toasts::Toasts;
@@ -240,6 +240,23 @@ impl Tab {
         }
     }
 
+    /// The tab's icon, also the leading glyph of its title.
+    fn icon(&self) -> egui_material_icons::MaterialIcon {
+        match &self.kind {
+            TabKind::Home => ICON_DASHBOARD,
+            TabKind::Sql(_) => ICON_CODE,
+            TabKind::Table(_) => ICON_TABLE,
+            TabKind::Object(_) => ICON_DATA_OBJECT,
+            TabKind::Monitor(_) => ICON_MONITORING,
+            TabKind::Users(_) => ICON_GROUP,
+            TabKind::Redis(_) => ICON_KEY,
+            TabKind::Docker(_) => ICON_DEPLOYED_CODE,
+            TabKind::Resource(t) => t.node.as_ref().map(|n| views::resource::node_icon(n.icon)).unwrap_or(ICON_DNS),
+            TabKind::Terminal(_) => ICON_TERMINAL,
+            TabKind::Files(_) => ICON_FOLDER_OPEN,
+        }
+    }
+
     fn title(&self, cx: &AppCtx) -> String {
         let conn = self.conn().map(|c| cx.profile_name(c)).unwrap_or_default();
         match &self.kind {
@@ -350,11 +367,18 @@ impl Behavior<Tab> for Viewer<'_> {
             _ => String::new(),
         };
         let prod = matches!(tiles.get(tile_id), Some(Tile::Pane(p)) if p.conn().and_then(|c| self.cx.store.profile(c)).is_some_and(|pr| pr.environment.is_protected()));
+        let (is_home, tab_icon, tab_driver) = match tiles.get(tile_id) {
+            Some(Tile::Pane(p)) => (matches!(p.kind, TabKind::Home), p.icon(), p.conn().and_then(|c| self.cx.store.profile(c)).map(|pr| pr.driver.clone())),
+            _ => (false, ICON_DASHBOARD, None),
+        };
+        // Cartoon tabs draw their icon in code, so the title drops its leading glyph.
+        let cartoon_glyph = theme::is_cartoon().then_some(tab_icon);
+        let title = if cartoon_glyph.is_some() { title.split_once("  ").map(|(_, rest)| rest.to_string()).unwrap_or(title) } else { title };
         let font = egui::FontId::proportional(13.5);
         let text_color = if state.active { t.fg } else { t.muted_fg };
         let galley = ui.painter().layout_no_wrap(title, font, text_color);
         let (pad, close) = (12.0, 18.0);
-        let width = galley.size().x + pad * 2.0 + if state.closable { close + 6.0 } else { 0.0 };
+        let width = galley.size().x + pad * 2.0 + if state.closable { close + 6.0 } else { 0.0 } + if cartoon_glyph.is_some() { 24.0 } else { 0.0 };
         let (_, rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
         let resp = ui.interact(rect, id, egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
         if !state.is_being_dragged {
@@ -370,7 +394,21 @@ impl Behavior<Tab> for Viewer<'_> {
                 let bar = if prod { t.destructive } else { t.accent };
                 ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), 2.0)), 0.0, bar);
             }
-            ui.painter().galley(egui::pos2(rect.left() + pad, rect.center().y - galley.size().y / 2.0), galley, text_color);
+            let mut tx = rect.left() + pad;
+            if let Some(glyph) = cartoon_glyph {
+                // Cartoon: Vee for Home, the connection's sticker for its tabs, else the cartoon icon.
+                let c = egui::pos2(tx + 9.0, rect.center().y);
+                let dark = ui.visuals().dark_mode;
+                match tab_driver.as_deref() {
+                    _ if is_home => {
+                        theme::paint_brand_mark(ui, egui::Rect::from_center_size(c, egui::vec2(18.0, 18.0)));
+                    }
+                    Some(d) => theme::paint_connector_sticker(ui.painter(), c, 18.0, d, dark),
+                    None => theme::paint_cartoon_icon(ui.painter(), c, 17.0, glyph, dark),
+                }
+                tx += 24.0;
+            }
+            ui.painter().galley(egui::pos2(tx, rect.center().y - galley.size().y / 2.0), galley, text_color);
             if state.closable {
                 let crect = egui::Rect::from_center_size(egui::pos2(rect.right() - pad / 2.0 - close / 2.0, rect.center().y), egui::vec2(close, close));
                 let cresp = ui.interact(crect, id.with("close"), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Close tab (⌘W)");
@@ -416,6 +454,7 @@ impl OpenvApp {
     pub fn new(ctx: &egui::Context, rt: tokio::runtime::Handle, registry: DriverRegistry) -> Self {
         let store = Store::load();
         let bg = Bg::new(rt, ctx.clone());
+        theme::set_cartoon(ctx, store.ws.settings.style == ThemeStyle::Cartoon);
         apply_theme(ctx, store.ws.settings.theme);
         let mut cx = AppCtx {
             bg,
@@ -744,17 +783,6 @@ impl OpenvApp {
                     }
                     if ui.button(String::from(ICON_INFO)).on_hover_text(format!("About OpenVClient {}", env!("CARGO_PKG_VERSION"))).clicked() {
                         self.cx.show_about = !self.cx.show_about;
-                    }
-                    let (icon, next, tip) = match self.cx.store.ws.settings.theme {
-                        ThemeChoice::System => (ICON_CONTRAST, ThemeChoice::Dark, "Theme: system (click for dark)"),
-                        ThemeChoice::Dark => (ICON_DARK_MODE, ThemeChoice::Light, "Theme: dark (click for light)"),
-                        ThemeChoice::Light => (ICON_LIGHT_MODE, ThemeChoice::Cartoon, "Theme: light (click for cartoon)"),
-                        ThemeChoice::Cartoon => (ICON_PALETTE, ThemeChoice::System, "Theme: cartoon (click for system)"),
-                    };
-                    if ui.button(String::from(icon)).on_hover_text(tip).clicked() {
-                        self.cx.store.ws.settings.theme = next;
-                        apply_theme(ui.ctx(), next);
-                        self.cx.mark_dirty();
                     }
                     if let Some(rel) = &self.cx.update.available {
                         let label = format!("Update {}", rel.version);
@@ -1113,17 +1141,32 @@ impl OpenvApp {
                     ui.add_space(theme::space::XS);
                 };
                 ui.label(RichText::new("APPEARANCE").small().strong().color(t.muted_fg));
-                row(ui, "Theme", "", &mut |ui| {
-                    for (v, l, tip) in [
-                        (ThemeChoice::System, "System", "Original theme, light or dark like your system"),
-                        (ThemeChoice::Dark, "Dark", "Original dark theme"),
-                        (ThemeChoice::Light, "Light", "Original light theme"),
-                        (ThemeChoice::Cartoon, "Cartoon", "Playful theme from openvclient.xyz: outlines, sticker shadows and connector stickers. Day or night like your system"),
-                    ] {
-                        if ui.selectable_value(&mut s.theme, v, l).on_hover_text(tip).clicked() {
-                            apply_theme(ui.ctx(), v);
+                row(ui, "Style", "Original look, or the playful cartoon look of openvclient.xyz", &mut |ui| {
+                    let label = |v: ThemeStyle| match v {
+                        ThemeStyle::Original => "Original",
+                        ThemeStyle::Cartoon => "Cartoon",
+                    };
+                    egui::ComboBox::from_id_salt("theme_style").selected_text(label(s.style)).width(160.0).show_ui(ui, |ui| {
+                        for v in [ThemeStyle::Original, ThemeStyle::Cartoon] {
+                            if ui.selectable_value(&mut s.style, v, label(v)).clicked() {
+                                theme::set_cartoon(ui.ctx(), v == ThemeStyle::Cartoon);
+                            }
                         }
-                    }
+                    });
+                });
+                row(ui, "Mode", "Light or dark; System follows your computer", &mut |ui| {
+                    let label = |v: ThemeChoice| match v {
+                        ThemeChoice::Dark => "Dark",
+                        ThemeChoice::Light => "Light",
+                        _ => "System",
+                    };
+                    egui::ComboBox::from_id_salt("theme_mode").selected_text(label(s.theme)).width(160.0).show_ui(ui, |ui| {
+                        for v in [ThemeChoice::System, ThemeChoice::Dark, ThemeChoice::Light] {
+                            if ui.selectable_value(&mut s.theme, v, label(v)).clicked() {
+                                apply_theme(ui.ctx(), v);
+                            }
+                        }
+                    });
                 });
                 row(ui, "Editor font size", "SQL editor and DDL views", &mut |ui| {
                     ui.spacing_mut().slider_width = 220.0;
@@ -1205,10 +1248,10 @@ impl OpenvApp {
     }
 }
 
+/// Light/dark mode; the style (original or cartoon) is `theme::set_cartoon`.
 pub fn apply_theme(ctx: &egui::Context, t: ThemeChoice) {
-    theme::set_cartoon(ctx, t == ThemeChoice::Cartoon);
     ctx.set_theme(match t {
-        ThemeChoice::System | ThemeChoice::Cartoon => egui::ThemePreference::System,
+        ThemeChoice::System | ThemeChoice::LegacyCartoon => egui::ThemePreference::System,
         ThemeChoice::Dark => egui::ThemePreference::Dark,
         ThemeChoice::Light => egui::ThemePreference::Light,
     });
@@ -1748,7 +1791,7 @@ mod walkthrough {
             app.cx.store.ws.profiles.extend(others);
             app.cx.store.toggle_favorite(shop_id);
             app.cx.store.toggle_favorite(pinned);
-            app.cx.store.ws.settings.theme = ThemeChoice::Cartoon;
+            app.cx.store.ws.settings.style = ThemeStyle::Cartoon;
         }
         h.ctx.set_theme(egui::Theme::Light);
         theme::set_cartoon(&h.ctx, true);
@@ -1777,6 +1820,9 @@ mod walkthrough {
         h.state_mut().cx.conn_dialog = None;
         h.state_mut().cx.show_settings = true;
         shot(&mut h, &out, "c6-settings-day");
+        h.ctx.set_theme(egui::Theme::Dark);
+        shot(&mut h, &out, "c6-settings-night");
+        h.ctx.set_theme(egui::Theme::Light);
         h.state_mut().cx.show_settings = false;
         h.state_mut().cx.show_shortcuts = true;
         shot(&mut h, &out, "c7-shortcuts-day");

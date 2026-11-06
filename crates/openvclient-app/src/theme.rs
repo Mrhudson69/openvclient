@@ -286,7 +286,8 @@ fn cartoon_visuals(t: Tokens, dark: bool) -> Visuals {
         w.corner_radius = CornerRadius::same(8);
     }
     let press = if dark { Color32::from_rgb(0x4a, 0x41, 0x7a) } else { pop::YELLOW };
-    v.widgets.inactive.bg_fill = t.card;
+    // Slider rails and other tracks paint with bg_fill; buttons use weak_bg_fill.
+    v.widgets.inactive.bg_fill = if dark { Color32::from_rgb(0x3a, 0x35, 0x58) } else { Color32::from_rgb(0xf0, 0xdf, 0xbb) };
     v.widgets.inactive.weak_bg_fill = t.card;
     v.widgets.inactive.bg_stroke = Stroke::new(1.5, ink);
     v.widgets.hovered.bg_fill = t.secondary;
@@ -481,17 +482,26 @@ pub fn danger_button(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Respon
 /// variant has an ink outline, the dark one a cream outline and coral shadow.
 /// Textures are decoded once and cached in egui's memory.
 pub fn brand_mark(ui: &mut egui::Ui, size: f32) -> egui::Response {
-    let dark = ui.visuals().dark_mode;
+    let tex = brand_texture(ui.ctx(), ui.visuals().dark_mode);
+    ui.add(egui::Image::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(size, size))))
+}
+
+/// The mark painted into `rect` without taking layout space (e.g. inside a tab).
+pub fn paint_brand_mark(ui: &egui::Ui, rect: egui::Rect) {
+    let tex = brand_texture(ui.ctx(), ui.visuals().dark_mode);
+    ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+}
+
+fn brand_texture(ctx: &egui::Context, dark: bool) -> egui::TextureHandle {
     let key = egui::Id::unique(("openvclient_brand_mark", dark));
-    let tex = ui.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(key)).unwrap_or_else(|| {
+    ctx.data_mut(|d| d.get_temp::<egui::TextureHandle>(key)).unwrap_or_else(|| {
         let bytes: &[u8] = if dark { include_bytes!("../assets/brand/mark-dark.png") } else { include_bytes!("../assets/brand/mark-light.png") };
         let img = image::load_from_memory(bytes).map(|i| i.to_rgba8()).unwrap_or_default();
         let color = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
-        let tex = ui.ctx().load_texture("openvclient-brand-mark", color, egui::TextureOptions::LINEAR);
-        ui.ctx().data_mut(|d| d.insert_temp(key, tex.clone()));
+        let tex = ctx.load_texture("openvclient-brand-mark", color, egui::TextureOptions::LINEAR);
+        ctx.data_mut(|d| d.insert_temp(key, tex.clone()));
         tex
-    });
-    ui.add(egui::Image::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(size, size))))
+    })
 }
 
 /// "OpenVClient" with the brand-green V, as in the logo.

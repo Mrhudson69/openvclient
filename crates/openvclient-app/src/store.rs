@@ -14,7 +14,19 @@ pub enum ThemeChoice {
     System,
     Dark,
     Light,
-    /// The playful look of openvclient.xyz; follows the system's day/night setting.
+    /// Old single setting for the cartoon look; read from older workspaces
+    /// and turned into `style: Cartoon` with the system mode on load.
+    #[serde(rename = "Cartoon")]
+    LegacyCartoon,
+}
+
+/// Visual style, chosen separately from the light/dark mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThemeStyle {
+    /// The original look.
+    #[default]
+    Original,
+    /// The playful look of openvclient.xyz.
     Cartoon,
 }
 
@@ -22,6 +34,8 @@ pub enum ThemeChoice {
 pub struct Settings {
     #[serde(default)]
     pub theme: ThemeChoice,
+    #[serde(default)]
+    pub style: ThemeStyle,
     #[serde(default = "default_rows")]
     pub max_rows: usize,
     #[serde(default = "default_page")]
@@ -58,6 +72,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: ThemeChoice::System,
+            style: ThemeStyle::Original,
             max_rows: default_rows(),
             page_size: default_page(),
             editor_font_size: default_font(),
@@ -163,6 +178,10 @@ impl Store {
         let (ws, load_error) = match std::fs::read(&path) {
             Ok(bytes) => match serde_json::from_slice::<Workspace>(&bytes) {
                 Ok(mut ws) => {
+                    if ws.settings.theme == ThemeChoice::LegacyCartoon {
+                        ws.settings.theme = ThemeChoice::System;
+                        ws.settings.style = ThemeStyle::Cartoon;
+                    }
                     let lost = unseal(&mut ws);
                     let warn =
                         (lost > 0).then(|| format!("{lost} encrypted item(s) in the workspace could not be decrypted (the key in the system keychain is missing or different) and were left out."));
