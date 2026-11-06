@@ -4,6 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo build --release -p openvclient-app
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+# Bundle versions must be numeric: 0.1.0-beta.1 -> 0.1.0.
+BUNDLE_VERSION=${VERSION%%-*}
 APP=dist/OpenVClient.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -17,8 +19,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>OpenVClient</string>
   <key>CFBundleDisplayName</key><string>OpenVClient</string>
   <key>CFBundleIdentifier</key><string>dev.openvclient.client</string>
-  <key>CFBundleVersion</key><string>${VERSION}</string>
-  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+  <key>CFBundleVersion</key><string>${BUNDLE_VERSION}</string>
+  <key>CFBundleShortVersionString</key><string>${BUNDLE_VERSION}</string>
   <key>CFBundleExecutable</key><string>OpenVClient</string>
   <key>CFBundleIconFile</key><string>OpenVClient</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>

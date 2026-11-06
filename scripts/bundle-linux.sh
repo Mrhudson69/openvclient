@@ -16,6 +16,9 @@ cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+# Package-manager version: 0.1.0-beta.1 -> 0.1.0~beta.1 (dpkg and rpm sort
+# "~" before the release, and rpm does not allow "-" in Version).
+PKGVER=${VERSION/-/\~}
 TARGET=${TARGET:-}
 if [[ -z "${SKIP_BUILD:-}" ]]; then
   if [[ -n "$TARGET" ]]; then
@@ -151,7 +154,7 @@ if command -v dpkg-deb >/dev/null; then
   # The keyring and file dialogs talk to D-Bus services (recommended only).
   cat > "$DEB/DEBIAN/control" <<CONTROL
 Package: openvclient
-Version: ${VERSION}
+Version: ${PKGVER}
 Section: database
 Priority: optional
 Architecture: ${DEBARCH}
@@ -187,7 +190,7 @@ if command -v rpmbuild >/dev/null; then
   layout_into "$RPMROOT/usr"
   cat > "$RPMTOP/SPECS/openvclient.spec" <<SPEC
 Name:           openvclient
-Version:        ${VERSION}
+Version:        ${PKGVER}
 Release:        1
 Summary:        ${SUMMARY}
 License:        MIT OR Apache-2.0

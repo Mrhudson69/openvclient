@@ -84,8 +84,8 @@ jobs:
             <key>CFBundleName</key><string>OpenVClient</string>
             <key>CFBundleDisplayName</key><string>OpenVClient</string>
             <key>CFBundleIdentifier</key><string>dev.openvclient.client</string>
-            <key>CFBundleVersion</key><string>${VERSION}</string>
-            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleVersion</key><string>${VERSION%%-*}</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION%%-*}</string>
             <key>CFBundleExecutable</key><string>OpenVClient</string>
             <key>CFBundleIconFile</key><string>OpenVClient</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -363,6 +363,11 @@ jobs:
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          path: src
+          fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -385,10 +390,20 @@ jobs:
         run: |
           prerelease=""
           case "$TAG" in v0.*|*-*) prerelease="--prerelease" ;; esac
+          # Title: "Beta v0.1.0" for v0.1.0-beta.N, "RC v1.0.0" for -rc.N, else the tag.
+          case "$TAG" in
+            *-beta*) title="Beta ${TAG%%-*}" ;;
+            *-alpha*) title="Alpha ${TAG%%-*}" ;;
+            *-rc*) title="RC ${TAG%%-*}" ;;
+            *) title="OpenVClient $TAG" ;;
+          esac
+          # Notes: docs/release-notes/<tag>.md from the tagged commit, if present.
+          notes_file="docs/release-notes/$TAG.md"
+          git -C "$GITHUB_WORKSPACE/src" show "$TAG:$notes_file" > "$RUNNER_TEMP/notes.md" 2>/dev/null \
+            || echo "Release $TAG. Verify downloads with: sha256sum -c SHA256SUMS" > "$RUNNER_TEMP/notes.md"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" artifacts/* --clobber
           else
-            gh release create "$TAG" artifacts/* --draft $prerelease \
-              --title "OpenVClient $TAG" \
-              --notes "Draft release for $TAG. Verify with: sha256sum -c SHA256SUMS. Replace these notes with the CHANGELOG entry before publishing."
+            gh release create "$TAG" artifacts/* --draft $prerelease --verify-tag \
+              --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
           fi

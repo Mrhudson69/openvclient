@@ -4580,7 +4580,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-app"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -4625,7 +4625,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-core"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4642,7 +4642,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-docker"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "bollard",
@@ -4656,7 +4656,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-http"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "openvclient-core",
@@ -4668,7 +4668,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-mongo"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -4680,7 +4680,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-mysql"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -4693,7 +4693,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-net"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "base64 0.23.1",
  "openvclient-core",
@@ -4707,7 +4707,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-postgres"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "deadpool-postgres",
@@ -4724,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-redis"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "openvclient-core",
@@ -4734,7 +4734,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-sqlite"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "openvclient-core",
@@ -4745,7 +4745,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-sqlserver"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4763,7 +4763,7 @@ dependencies = [
 
 [[package]]
 name = "openvclient-storage"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
