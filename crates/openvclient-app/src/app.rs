@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use egui::{Key, KeyboardShortcut, Modifiers, RichText};
-use egui_tiles::{Behavior, Container, SimplificationOptions, TabState, Tile, TileId, Tiles, Tree, UiResponse};
 use egui_material_icons::icons::*;
+use egui_tiles::{Behavior, Container, SimplificationOptions, TabState, Tile, TileId, Tiles, Tree, UiResponse};
 use openvclient_core::sql::{Catalog, ObjPath, ObjectKind};
 use openvclient_core::{DriverRegistry, Result};
 use uuid::Uuid;
@@ -21,15 +21,37 @@ use crate::widgets::toasts::Toasts;
 /// Actions views request; applied after the frame's UI is drawn so views
 /// never need mutable access to the dock.
 pub enum Cmd {
-    NewSql { conn: Uuid, database: Option<String>, text: String },
-    OpenTable { conn: Uuid, kind: ObjectKind, path: ObjPath },
-    OpenObject { conn: Uuid, kind: ObjectKind, path: ObjPath },
+    NewSql {
+        conn: Uuid,
+        database: Option<String>,
+        text: String,
+    },
+    OpenTable {
+        conn: Uuid,
+        kind: ObjectKind,
+        path: ObjPath,
+    },
+    OpenObject {
+        conn: Uuid,
+        kind: ObjectKind,
+        path: ObjPath,
+    },
     OpenMonitor(Uuid),
     OpenUsers(Uuid),
     OpenTerminal(Uuid),
-    OpenRedis { conn: Uuid, db: u32 },
-    OpenDocker { conn: Uuid, section: views::docker::Section },
-    OpenResource { conn: Uuid, node: Option<openvclient_core::resource::Node>, action: Option<&'static str> },
+    OpenRedis {
+        conn: Uuid,
+        db: u32,
+    },
+    OpenDocker {
+        conn: Uuid,
+        section: views::docker::Section,
+    },
+    OpenResource {
+        conn: Uuid,
+        node: Option<openvclient_core::resource::Node>,
+        action: Option<&'static str>,
+    },
     OpenHome,
     Connect(Uuid),
     Disconnect(Uuid),
@@ -126,14 +148,7 @@ impl AppCtx {
             Some(c) if self.is_production(c) && self.store.ws.settings.confirm_production => name.or_else(|| Some(self.profile_name(c))),
             _ => None,
         };
-        self.confirm = Some(Confirm {
-            title: title.into(),
-            body: body.into(),
-            confirm_label: label.into(),
-            require_text,
-            typed: String::new(),
-            action: Some(Box::new(action)),
-        });
+        self.confirm = Some(Confirm { title: title.into(), body: body.into(), confirm_label: label.into(), require_text, typed: String::new(), action: Some(Box::new(action)) });
     }
 
     /// Autocomplete catalog for a connection/database, loaded lazily.
@@ -154,12 +169,10 @@ impl AppCtx {
             }
             Some(CatalogState::Failed) => false,
         };
-        if stale {
-            if let Some(s) = self.conns.session(conn).and_then(|h| h.sql()).cloned() {
-                let db = database.clone();
-                let job = self.bg.spawn("", async move { s.catalog(db.as_deref()).await });
-                self.catalogs.insert(key.clone(), CatalogState::Loading(job));
-            }
+        if stale && let Some(s) = self.conns.session(conn).and_then(|h| h.sql()).cloned() {
+            let db = database.clone();
+            let job = self.bg.spawn("", async move { s.catalog(db.as_deref()).await });
+            self.catalogs.insert(key.clone(), CatalogState::Loading(job));
         }
         match self.catalogs.get(&key) {
             Some(CatalogState::Ready(c, _)) => Some(c),
@@ -326,7 +339,13 @@ impl Behavior<Tab> for Viewer<'_> {
         let (_, rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
         let resp = ui.interact(rect, id, egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
         if !state.is_being_dragged {
-            let bg = if state.active { ui.visuals().panel_fill } else if resp.hovered() { t.muted } else { ui.visuals().extreme_bg_color };
+            let bg = if state.active {
+                ui.visuals().panel_fill
+            } else if resp.hovered() {
+                t.muted
+            } else {
+                ui.visuals().extreme_bg_color
+            };
             ui.painter().rect_filled(rect, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, bg);
             if state.active {
                 let bar = if prod { t.destructive } else { t.accent };
@@ -345,10 +364,8 @@ impl Behavior<Tab> for Viewer<'_> {
                 let s = egui::Stroke::new(1.6, color);
                 ui.painter().line_segment([r.left_top(), r.right_bottom()], s);
                 ui.painter().line_segment([r.right_top(), r.left_bottom()], s);
-                if cresp.clicked() || resp.clicked_by(egui::PointerButton::Middle) {
-                    if self.on_tab_close(tiles, tile_id) {
-                        tiles.remove(tile_id);
-                    }
+                if (cresp.clicked() || resp.clicked_by(egui::PointerButton::Middle)) && self.on_tab_close(tiles, tile_id) {
+                    tiles.remove(tile_id);
                 }
             }
         }
@@ -417,11 +434,11 @@ impl OpenvApp {
 
     fn open(&mut self, kind: TabKind) {
         let tab = Tab { id: self.cx.tab_id(), kind };
-        if let Some(key) = tab.key() {
-            if let Some(id) = self.find(|t| t.key().as_deref() == Some(key.as_str())) {
-                self.activate(id);
-                return;
-            }
+        if let Some(key) = tab.key()
+            && let Some(id) = self.find(|t| t.key().as_deref() == Some(key.as_str()))
+        {
+            self.activate(id);
+            return;
         }
         let pane = self.tree.tiles.insert_pane(tab);
         // Open next to the pane the user last worked in, else in the first tab bar.
@@ -429,9 +446,7 @@ impl OpenvApp {
             .focused
             .and_then(|f| self.tree.tiles.parent_of(f))
             .filter(|p| matches!(self.tree.tiles.get(*p), Some(Tile::Container(Container::Tabs(_)))))
-            .or_else(|| {
-                self.tree.tiles.iter().find_map(|(id, t)| matches!(t, Tile::Container(Container::Tabs(_))).then_some(*id))
-            });
+            .or_else(|| self.tree.tiles.iter().find_map(|(id, t)| matches!(t, Tile::Container(Container::Tabs(_))).then_some(*id)));
         match target {
             Some(tabs_id) => {
                 if let Some(Tile::Container(Container::Tabs(tabs))) = self.tree.tiles.get_mut(tabs_id) {
@@ -482,10 +497,10 @@ impl OpenvApp {
                 Cmd::OpenRedis { conn, db } => self.open(TabKind::Redis(Box::new(views::redis::RedisTab::new(conn, db)))),
                 Cmd::OpenDocker { conn, section } => {
                     let key = format!("docker:{conn}");
-                    if let Some(id) = self.find(|t| t.key().as_deref() == Some(key.as_str())) {
-                        if let Some(Tile::Pane(Tab { kind: TabKind::Docker(d), .. })) = self.tree.tiles.get_mut(id) {
-                            d.section = section;
-                        }
+                    if let Some(id) = self.find(|t| t.key().as_deref() == Some(key.as_str()))
+                        && let Some(Tile::Pane(Tab { kind: TabKind::Docker(d), .. })) = self.tree.tiles.get_mut(id)
+                    {
+                        d.section = section;
                     }
                     self.open(TabKind::Docker(Box::new(views::docker::DockerTab::new(conn, section))));
                 }
@@ -615,14 +630,12 @@ impl OpenvApp {
                 None => self.cx.toasts.info("No SQL connection selected", theme::kbd("Connect to a database first, then press ⌘T")),
             }
         }
-        if close {
-            if let Some(f) = self.focused.filter(|f| self.tree.tiles.get(*f).is_some()) {
-                if let Some(Tile::Pane(t)) = self.tree.tiles.get(f) {
-                    let tid = t.id;
-                    self.close_where(|t| t.id == tid);
-                }
-                self.focused = None;
+        if close && let Some(f) = self.focused.filter(|f| self.tree.tiles.get(*f).is_some()) {
+            if let Some(Tile::Pane(t)) = self.tree.tiles.get(f) {
+                let tid = t.id;
+                self.close_where(|t| t.id == tid);
             }
+            self.focused = None;
         }
         if home {
             self.cx.cmd(Cmd::OpenHome);
@@ -710,8 +723,7 @@ impl OpenvApp {
                                 ui.label(RichText::new(format!("· {}", ico(ICON_LOCK, &tn.description))).small().color(t.info)).on_hover_text("Traffic goes through this network path");
                             }
                             if let Some(lat) = l.latency {
-                                ui.label(RichText::new(format!("· {}", openvclient_core::elapsed_ms(lat))).small().color(t.muted_fg))
-                                    .on_hover_text("Last health check round trip");
+                                ui.label(RichText::new(format!("· {}", openvclient_core::elapsed_ms(lat))).small().color(t.muted_fg)).on_hover_text("Last health check round trip");
                             }
                         }
                         Some(ConnState::Failed(e)) => {
@@ -900,7 +912,13 @@ impl OpenvApp {
                 let logs = crate::store::config_dir().join("logs");
                 ui.label(RichText::new(format!("Logs: {}", logs.display())).small().color(t.muted_fg));
                 if ui.small_button("Open logs folder").clicked() {
-                    let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
+                    let opener = if cfg!(target_os = "macos") {
+                        "open"
+                    } else if cfg!(windows) {
+                        "explorer"
+                    } else {
+                        "xdg-open"
+                    };
                     let _ = std::process::Command::new(opener).arg(&logs).spawn();
                 }
             });
@@ -1037,10 +1055,10 @@ impl eframe::App for OpenvApp {
             self.tree.ui(&mut viewer, ui);
         });
 
-        if let Some(mut d) = self.cx.conn_dialog.take() {
-            if d.show(&ctx, &mut self.cx) {
-                self.cx.conn_dialog = Some(d);
-            }
+        if let Some(mut d) = self.cx.conn_dialog.take()
+            && d.show(&ctx, &mut self.cx)
+        {
+            self.cx.conn_dialog = Some(d);
         }
         if let Some(mut d) = self.cx.dialog.take() {
             // Keep the dialog only if it did not hand over to a new one.
@@ -1130,14 +1148,10 @@ mod walkthrough {
         std::fs::create_dir_all(&out).unwrap();
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         let handle = rt.handle().clone();
-        let mut h = Harness::builder()
-            .with_size(egui::vec2(1440.0, 900.0))
-            .with_pixels_per_point(1.5)
-            .with_max_steps(64)
-            .build_eframe(move |cc| {
-                theme::install(&cc.egui_ctx);
-                OpenvApp::new(&cc.egui_ctx, handle, crate::registry())
-            });
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_pixels_per_point(1.5).with_max_steps(64).build_eframe(move |cc| {
+            theme::install(&cc.egui_ctx);
+            OpenvApp::new(&cc.egui_ctx, handle, crate::registry())
+        });
         h.run_ok();
         shot(&mut h, &out, "01-home");
 
@@ -1162,11 +1176,14 @@ mod walkthrough {
         let pg = id_of(h.state(), "Postgres");
         {
             let sb = &mut h.state_mut().cx.sidebar;
-            sb.expand_path(pg, &[
-                format!("{:?}|{:?}", ObjectKind::Database, ObjPath::db(demo_db())),
-                format!("{:?}|{:?}", ObjectKind::Schema, ObjPath::db(demo_db()).with_schema("sales")),
-                format!("{:?}|{:?}", ObjectKind::Folder(openvclient_core::sql::FolderKind::Tables), ObjPath::db(demo_db()).with_schema("sales")),
-            ]);
+            sb.expand_path(
+                pg,
+                &[
+                    format!("{:?}|{:?}", ObjectKind::Database, ObjPath::db(demo_db())),
+                    format!("{:?}|{:?}", ObjectKind::Schema, ObjPath::db(demo_db()).with_schema("sales")),
+                    format!("{:?}|{:?}", ObjectKind::Folder(openvclient_core::sql::FolderKind::Tables), ObjPath::db(demo_db()).with_schema("sales")),
+                ],
+            );
         }
         settle(&mut h, |a| a.cx.sidebar.loaded_objects().iter().any(|(c, n)| *c == pg && n.label == "orders"), Duration::from_secs(10));
 

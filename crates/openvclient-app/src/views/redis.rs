@@ -151,10 +151,10 @@ impl RedisTab {
                 Err(e) => cx.toasts.error("Redis command failed", &e),
             }
         }
-        if let Some(r) = poll(&mut self.console_job) {
-            if let Some(last) = self.console_log.last_mut() {
-                last.1 = r.map_err(|e| e.to_string());
-            }
+        if let Some(r) = poll(&mut self.console_job)
+            && let Some(last) = self.console_log.last_mut()
+        {
+            last.1 = r.map_err(|e| e.to_string());
         }
         if !self.scanned_once && self.view == View::Keys {
             self.scan(cx, true);
@@ -172,7 +172,13 @@ impl RedisTab {
                 }
             });
             ui.separator();
-            for (v, icon, label) in [(View::Keys, ICON_KEY, "Keys"), (View::Console, ICON_TERMINAL, "Console"), (View::Info, ICON_INFO, "Server"), (View::Clients, ICON_GROUP, "Clients"), (View::Slowlog, ICON_TIMER, "Slow log")] {
+            for (v, icon, label) in [
+                (View::Keys, ICON_KEY, "Keys"),
+                (View::Console, ICON_TERMINAL, "Console"),
+                (View::Info, ICON_INFO, "Server"),
+                (View::Clients, ICON_GROUP, "Clients"),
+                (View::Slowlog, ICON_TIMER, "Slow log"),
+            ] {
                 if ui.selectable_value(&mut self.view, v, ico(icon, label)).clicked() {
                     self.info = None;
                     self.clients = None;
@@ -542,10 +548,10 @@ impl RedisTab {
             }
             KvValue::ZSet(items) => {
                 pair_editor(ui, &mut self.value, &mut self.field, "member", "score", || ());
-                if ui.button("ZADD").clicked() {
-                    if let Ok(score) = self.field.trim().parse() {
-                        edit = Some(KvEdit::ZAdd { member: self.value.clone(), score });
-                    }
+                if ui.button("ZADD").clicked()
+                    && let Ok(score) = self.field.trim().parse()
+                {
+                    edit = Some(KvEdit::ZAdd { member: self.value.clone(), score });
                 }
                 egui::Grid::new("zset").striped(true).num_columns(3).show(ui, |ui| {
                     for (m, s) in items {
@@ -606,12 +612,12 @@ impl RedisTab {
                     self.history_pos = Some(p);
                     self.console_input = hist[p].clone();
                 }
-                if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
-                    if let Some(p) = self.history_pos {
-                        let n = (p + 1).min(hist.len() - 1);
-                        self.history_pos = Some(n);
-                        self.console_input = hist[n].clone();
-                    }
+                if ui.input(|i| i.key_pressed(Key::ArrowDown))
+                    && let Some(p) = self.history_pos
+                {
+                    let n = (p + 1).min(hist.len() - 1);
+                    self.history_pos = Some(n);
+                    self.console_input = hist[n].clone();
                 }
             }
             let send = (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) | ui.button("Send").clicked();

@@ -137,20 +137,20 @@ impl ResourceTab {
                 Err(e) => cx.toasts.error("Action failed", &e),
             }
         }
-        if let Some(r) = poll(&mut self.console_job) {
-            if let Some(last) = self.console_log.last_mut() {
-                last.1 = r.map_err(|e| e.to_string());
-            }
+        if let Some(r) = poll(&mut self.console_job)
+            && let Some(last) = self.console_log.last_mut()
+        {
+            last.1 = r.map_err(|e| e.to_string());
         }
         if self.content.is_none() && self.job.is_none() && self.node.is_some() {
             self.load(cx);
         }
         let kind = self.node.as_ref().map(|n| n.kind.clone()).unwrap_or_default();
         let actions = s.actions(&kind);
-        if let Some(a) = self.pending_action.take() {
-            if let Some(spec) = actions.iter().find(|x| x.id == a) {
-                self.start_action(cx, spec.clone());
-            }
+        if let Some(a) = self.pending_action.take()
+            && let Some(spec) = actions.iter().find(|x| x.id == a)
+        {
+            self.start_action(cx, spec.clone());
         }
 
         // Header + actions.
@@ -215,46 +215,46 @@ impl ResourceTab {
         ui.add_space(theme::space::XS);
 
         // Console at the bottom.
-        if self.console_open {
-            if let Some(lang) = s.console_language() {
-                let node_id = self.node.as_ref().map(|n| n.id.clone());
-                egui::Panel::bottom(egui::Id::unique(("res_console", tab_id))).resizable(true).default_size(220.0).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(ico(ICON_TERMINAL, lang)).strong());
-                        if let Some(n) = &self.node {
-                            ui.label(RichText::new(format!("in {}", n.label)).small().color(t.muted_fg));
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("Clear").clicked() {
-                                self.console_log.clear();
-                            }
-                        });
-                    });
-                    let h = ui.available_height() - 36.0;
-                    egui::ScrollArea::vertical().max_height(h).stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                        for (cmd, out) in &self.console_log {
-                            ui.label(RichText::new(format!("> {cmd}")).monospace().color(t.info));
-                            match out {
-                                Ok(c) => content_inline(ui, c),
-                                Err(e) => {
-                                    ui.label(RichText::new(e).monospace().color(t.destructive));
-                                }
-                            }
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.console_input).font(egui::TextStyle::Monospace).desired_width(ui.available_width() - 70.0));
-                        let go = (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) | ui.button("Run").clicked();
-                        if go && !self.console_input.trim().is_empty() && self.console_job.is_none() {
-                            let line = std::mem::take(&mut self.console_input);
-                            let (s2, l2) = (s.clone(), line.clone());
-                            self.console_job = Some(cx.bg.spawn("", async move { s2.console(node_id.as_deref(), &l2).await }));
-                            self.console_log.push((line, Ok(Content::Empty("…".into()))));
-                            r.request_focus();
+        if self.console_open
+            && let Some(lang) = s.console_language()
+        {
+            let node_id = self.node.as_ref().map(|n| n.id.clone());
+            egui::Panel::bottom(egui::Id::unique(("res_console", tab_id))).resizable(true).default_size(220.0).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(ico(ICON_TERMINAL, lang)).strong());
+                    if let Some(n) = &self.node {
+                        ui.label(RichText::new(format!("in {}", n.label)).small().color(t.muted_fg));
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Clear").clicked() {
+                            self.console_log.clear();
                         }
                     });
                 });
-            }
+                let h = ui.available_height() - 36.0;
+                egui::ScrollArea::vertical().max_height(h).stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+                    for (cmd, out) in &self.console_log {
+                        ui.label(RichText::new(format!("> {cmd}")).monospace().color(t.info));
+                        match out {
+                            Ok(c) => content_inline(ui, c),
+                            Err(e) => {
+                                ui.label(RichText::new(e).monospace().color(t.destructive));
+                            }
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let r = ui.add(egui::TextEdit::singleline(&mut self.console_input).font(egui::TextStyle::Monospace).desired_width(ui.available_width() - 70.0));
+                    let go = (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) | ui.button("Run").clicked();
+                    if go && !self.console_input.trim().is_empty() && self.console_job.is_none() {
+                        let line = std::mem::take(&mut self.console_input);
+                        let (s2, l2) = (s.clone(), line.clone());
+                        self.console_job = Some(cx.bg.spawn("", async move { s2.console(node_id.as_deref(), &l2).await }));
+                        self.console_log.push((line, Ok(Content::Empty("…".into()))));
+                        r.request_focus();
+                    }
+                });
+            });
         }
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
@@ -272,7 +272,16 @@ impl ResourceTab {
                             if let Some(Ok(Content::TableWithNote(_, note))) = &self.content {
                                 ui.label(RichText::new(note).small().color(t.muted_fg));
                             }
-                            let ev = Grid { id: egui::Id::unique(("resgrid", tab_id, self.generation)), rs: &rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: self.generation, row_offset: self.offset }.show(ui, &mut self.grid);
+                            let ev = Grid {
+                                id: egui::Id::unique(("resgrid", tab_id, self.generation)),
+                                rs: &rs,
+                                editable: false,
+                                server_sort: None,
+                                overlay: Overlay::default(),
+                                generation: self.generation,
+                                row_offset: self.offset,
+                            }
+                            .show(ui, &mut self.grid);
                             detail_window(ui.ctx(), egui::Id::unique(("resdetail", tab_id)), &rs, &mut self.grid);
                             for e in ev {
                                 if let GridEvent::CopyRows(rows, f) = e {

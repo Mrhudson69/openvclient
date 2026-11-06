@@ -9,10 +9,7 @@ use async_trait::async_trait;
 use openvclient_core::explain::{ExplainResult, sqlite_plan_tree};
 use openvclient_core::sql::*;
 use openvclient_core::sqltext::Dialect;
-use openvclient_core::{
-    Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ResultSet,
-    ServerInfo, ServiceSession, SessionHandle, Value,
-};
+use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 use parking_lot::Mutex;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags, params_from_iter};
@@ -38,10 +35,7 @@ impl Default for SqliteDriver {
                         .required()
                         .placeholder("/path/to/database.db")
                         .help("The file is created if it does not exist (unless read-only)."),
-                    FieldSpec::text("busy_timeout", "Busy timeout (ms)")
-                        .kind(FieldKind::Number)
-                        .default("5000")
-                        .advanced(),
+                    FieldSpec::text("busy_timeout", "Busy timeout (ms)").kind(FieldKind::Number).default("5000").advanced(),
                 ],
             },
         }
@@ -80,10 +74,7 @@ impl Opener {
         let flags = if self.read_only {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_NO_MUTEX
         } else {
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_URI
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_NO_MUTEX
         };
         if self.read_only && !Path::new(&self.path).exists() {
             return Err(Error::invalid(format!("File not found: {}", self.path)));
@@ -144,10 +135,7 @@ fn bind_text(v: &Option<String>) -> rusqlite::types::Value {
 
 /// Run a prepared statement, collecting at most `max` rows.
 fn query_rows(stmt: &mut rusqlite::Statement<'_>, params: &[rusqlite::types::Value], max: usize) -> Result<ResultSet> {
-    let columns: Vec<ColumnMeta> = stmt
-        .columns()
-        .map(|c| ColumnMeta::new(c.name(), c.decl_type().unwrap_or("")))
-        .collect();
+    let columns: Vec<ColumnMeta> = stmt.columns().map(|c| ColumnMeta::new(c.name(), c.decl_type().unwrap_or(""))).collect();
     let n = columns.len();
     let mut rs = ResultSet::new(columns);
     let mut rows = stmt.query(params_from_iter(params.iter())).map_err(err)?;
@@ -221,15 +209,7 @@ fn table_columns(conn: &Connection, schema: &str, table: &str) -> Result<Vec<Col
             3 => Some("generated (stored)".to_string()),
             _ => None,
         };
-        out.push(ColumnInfo {
-            name,
-            data_type: ty,
-            nullable: !notnull,
-            default,
-            primary_key: pk > 0,
-            auto_increment: false,
-            comment,
-        });
+        out.push(ColumnInfo { name, data_type: ty, nullable: !notnull, default, primary_key: pk > 0, auto_increment: false, comment });
     }
     // A single INTEGER PRIMARY KEY aliases rowid and auto-assigns values.
     if pk_count == 1 {
@@ -258,10 +238,7 @@ impl ServiceSession for SqliteSession {
         ServerInfo {
             product: format!("SQLite {}", self.version),
             version: self.version.clone(),
-            details: vec![
-                ("File".into(), self.opener.path.clone()),
-                ("Mode".into(), if self.opener.read_only { "read-only" } else { "read-write" }.into()),
-            ],
+            details: vec![("File".into(), self.opener.path.clone()), ("Mode".into(), if self.opener.read_only { "read-only" } else { "read-write" }.into())],
         }
     }
 
@@ -281,16 +258,7 @@ impl SqlSession for SqliteSession {
     }
 
     fn capabilities(&self) -> SqlCapabilities {
-        SqlCapabilities {
-            schemas: true,
-            explain: true,
-            metrics: true,
-            edit_data: !self.opener.read_only,
-            backup: true,
-            restore: !self.opener.read_only,
-            triggers: true,
-            ..Default::default()
-        }
+        SqlCapabilities { schemas: true, explain: true, metrics: true, edit_data: !self.opener.read_only, backup: true, restore: !self.opener.read_only, triggers: true, ..Default::default() }
     }
 
     fn default_database(&self) -> Option<String> {
@@ -314,37 +282,13 @@ impl SqlSession for SqliteSession {
             };
             let schema = schema_of(&path);
             let base = ObjPath::default().with_schema(&schema);
-            let list = |ty: &str| {
-                names(
-                    c,
-                    &format!(
-                        "SELECT name FROM {} WHERE type = '{ty}' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-                        master(&schema)
-                    ),
-                )
-            };
+            let list = |ty: &str| names(c, &format!("SELECT name FROM {} WHERE type = '{ty}' AND name NOT LIKE 'sqlite_%' ORDER BY name", master(&schema)));
             Ok(match kind {
-                ObjectKind::Schema => vec![
-                    TreeNode::folder(FolderKind::Tables, base.clone()),
-                    TreeNode::folder(FolderKind::Views, base.clone()),
-                    TreeNode::folder(FolderKind::Triggers, base),
-                ],
-                ObjectKind::Folder(FolderKind::Tables) => list("table")?
-                    .into_iter()
-                    .map(|n| TreeNode::new(ObjectKind::Table, n.clone(), base.clone().with_name(n)))
-                    .collect(),
-                ObjectKind::Folder(FolderKind::Views) => list("view")?
-                    .into_iter()
-                    .map(|n| TreeNode::new(ObjectKind::View, n.clone(), base.clone().with_name(n)).leaf())
-                    .collect(),
-                ObjectKind::Folder(FolderKind::Triggers) => list("trigger")?
-                    .into_iter()
-                    .map(|n| TreeNode::new(ObjectKind::Trigger, n.clone(), base.clone().with_name(n)).leaf())
-                    .collect(),
-                ObjectKind::Table => vec![
-                    TreeNode::folder(FolderKind::Columns, path.clone()),
-                    TreeNode::folder(FolderKind::Indexes, path.clone()),
-                ],
+                ObjectKind::Schema => vec![TreeNode::folder(FolderKind::Tables, base.clone()), TreeNode::folder(FolderKind::Views, base.clone()), TreeNode::folder(FolderKind::Triggers, base)],
+                ObjectKind::Folder(FolderKind::Tables) => list("table")?.into_iter().map(|n| TreeNode::new(ObjectKind::Table, n.clone(), base.clone().with_name(n))).collect(),
+                ObjectKind::Folder(FolderKind::Views) => list("view")?.into_iter().map(|n| TreeNode::new(ObjectKind::View, n.clone(), base.clone().with_name(n)).leaf()).collect(),
+                ObjectKind::Folder(FolderKind::Triggers) => list("trigger")?.into_iter().map(|n| TreeNode::new(ObjectKind::Trigger, n.clone(), base.clone().with_name(n)).leaf()).collect(),
+                ObjectKind::Table => vec![TreeNode::folder(FolderKind::Columns, path.clone()), TreeNode::folder(FolderKind::Indexes, path.clone())],
                 ObjectKind::Folder(FolderKind::Columns) => {
                     let table = path.name()?;
                     table_columns(c, &schema, table)?
@@ -363,12 +307,9 @@ impl SqlSession for SqliteSession {
                 }
                 ObjectKind::Folder(FolderKind::Indexes) => {
                     let table = path.name()?;
-                    let sql =
-                        format!("PRAGMA {}.index_list({})", D.quote_ident(&schema), D.quote_literal(table));
+                    let sql = format!("PRAGMA {}.index_list({})", D.quote_ident(&schema), D.quote_literal(table));
                     let mut st = c.prepare(&sql).map_err(err)?;
-                    let rows = st
-                        .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))
-                        .map_err(err)?;
+                    let rows = st.query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?))).map_err(err)?;
                     let mut out = Vec::new();
                     for r in rows {
                         let (name, unique, origin) = r.map_err(err)?;
@@ -402,11 +343,7 @@ impl SqlSession for SqliteSession {
             if kind == ObjectKind::Table {
                 let extra = names(
                     c,
-                    &format!(
-                        "SELECT sql || ';' FROM {} WHERE tbl_name = {} AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type, name",
-                        master(&schema),
-                        D.quote_literal(&name)
-                    ),
+                    &format!("SELECT sql || ';' FROM {} WHERE tbl_name = {} AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type, name", master(&schema), D.quote_literal(&name)),
                 )?;
                 for e in extra {
                     out.push('\n');
@@ -435,20 +372,12 @@ impl SqlSession for SqliteSession {
             let pk: Vec<String> = cols.iter().filter(|c| c.primary_key).map(|c| c.name.clone()).collect();
             let without_rowid = osql.to_ascii_uppercase().contains("WITHOUT ROWID");
             let use_rowid = otype == "table" && pk.is_empty() && !without_rowid;
-            let mut sql = if use_rowid {
-                format!("SELECT rowid AS \"__openvclient_rowid\", * FROM {target}")
-            } else {
-                format!("SELECT * FROM {target}")
-            };
+            let mut sql = if use_rowid { format!("SELECT rowid AS \"__openvclient_rowid\", * FROM {target}") } else { format!("SELECT * FROM {target}") };
             if let Some(f) = q.filter.as_deref().filter(|f| !f.trim().is_empty()) {
                 sql.push_str(&format!(" WHERE {f}"));
             }
             if !q.order_by.is_empty() {
-                let parts: Vec<String> = q
-                    .order_by
-                    .iter()
-                    .map(|(c, d)| format!("{} {}", D.quote_ident(c), if *d == SortDir::Asc { "ASC" } else { "DESC" }))
-                    .collect();
+                let parts: Vec<String> = q.order_by.iter().map(|(c, d)| format!("{} {}", D.quote_ident(c), if *d == SortDir::Asc { "ASC" } else { "DESC" })).collect();
                 sql.push_str(&format!(" ORDER BY {}", parts.join(", ")));
             }
             sql.push_str(&format!(" LIMIT {} OFFSET {}", q.limit, q.offset));
@@ -502,8 +431,7 @@ impl SqlSession for SqliteSession {
                 let (sql, params) = match ch {
                     RowChange::Update { key, values } => {
                         let mut params: Vec<_> = values.iter().map(|(_, v)| bind_text(v)).collect();
-                        let sets: Vec<String> =
-                            values.iter().enumerate().map(|(i, (c, _))| format!("{} = ?{}", D.quote_ident(c), i + 1)).collect();
+                        let sets: Vec<String> = values.iter().enumerate().map(|(i, (c, _))| format!("{} = ?{}", D.quote_ident(c), i + 1)).collect();
                         let (w, kp) = where_key(&key, params.len());
                         params.extend(kp);
                         (format!("UPDATE {target} SET {} WHERE {w}", sets.join(", ")), params)
@@ -541,9 +469,7 @@ impl SqlSession for SqliteSession {
                      WHERE m.type IN ('table','view') AND m.name NOT LIKE 'sqlite_%' ORDER BY m.name, p.cid",
                 )
                 .map_err(err)?;
-            let rows = st
-                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)))
-                .map_err(err)?;
+            let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?))).map_err(err)?;
             for r in rows {
                 let (t, ty, col) = r.map_err(err)?;
                 let entry = cat.columns.entry(t.clone()).or_default();
@@ -590,11 +516,8 @@ impl SqlSession for SqliteSession {
     async fn metrics(&self) -> Result<Vec<Metric>> {
         let path = self.opener.path.clone();
         self.with(move |c| {
-            let pragma = |p: &str| -> String {
-                c.query_row(&format!("PRAGMA {p}"), [], |r| r.get_ref(0).map(to_value))
-                    .map(|v| v.to_text().unwrap_or_default())
-                    .unwrap_or_else(|e| format!("error: {e}"))
-            };
+            let pragma =
+                |p: &str| -> String { c.query_row(&format!("PRAGMA {p}"), [], |r| r.get_ref(0).map(to_value)).map(|v| v.to_text().unwrap_or_default()).unwrap_or_else(|e| format!("error: {e}")) };
             let page_size: f64 = pragma("page_size").parse().unwrap_or(0.0);
             let pages: f64 = pragma("page_count").parse().unwrap_or(0.0);
             let free: f64 = pragma("freelist_count").parse().unwrap_or(0.0);
@@ -605,11 +528,7 @@ impl SqlSession for SqliteSession {
                 Metric::new("Storage", "Page size (bytes)", page_size),
                 Metric::new("Storage", "Pages", pages),
                 Metric::new("Storage", "Free pages", free).hint("Reclaimable with VACUUM"),
-                Metric::new(
-                    "Storage",
-                    "Fragmentation (%)",
-                    format!("{:.1}", if pages > 0.0 { free / pages * 100.0 } else { 0.0 }),
-                ),
+                Metric::new("Storage", "Fragmentation (%)", format!("{:.1}", if pages > 0.0 { free / pages * 100.0 } else { 0.0 })),
                 Metric::new("Configuration", "Journal mode", pragma("journal_mode")),
                 Metric::new("Configuration", "Synchronous", pragma("synchronous")),
                 Metric::new("Configuration", "Auto-vacuum", pragma("auto_vacuum")),
@@ -634,12 +553,7 @@ impl SqlSession for SqliteSession {
             let t = Instant::now();
             c.backup(rusqlite::MAIN_DB, &dest, None::<fn(rusqlite::backup::Progress)>).map_err(err)?;
             let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
-            Ok(format!(
-                "Online backup written to {} ({} bytes) in {}",
-                dest.display(),
-                size,
-                openvclient_core::elapsed_ms(t.elapsed())
-            ))
+            Ok(format!("Online backup written to {} ({} bytes) in {}", dest.display(), size, openvclient_core::elapsed_ms(t.elapsed())))
         })
         .await
     }
@@ -664,13 +578,7 @@ fn where_key(key: &RowKey, offset: usize) -> (String, Vec<rusqlite::types::Value
             let w: Vec<String> = cols
                 .iter()
                 .enumerate()
-                .map(|(i, (c, v))| {
-                    if v.is_null() {
-                        format!("{} IS ?{}", D.quote_ident(c), offset + i + 1)
-                    } else {
-                        format!("{} = ?{}", D.quote_ident(c), offset + i + 1)
-                    }
-                })
+                .map(|(i, (c, v))| if v.is_null() { format!("{} IS ?{}", D.quote_ident(c), offset + i + 1) } else { format!("{} = ?{}", D.quote_ident(c), offset + i + 1) })
                 .collect();
             (w.join(" AND "), cols.iter().map(|(_, v)| bind(v)).collect())
         }
@@ -698,11 +606,7 @@ impl SqlConsole for SqliteConsole {
                     } else {
                         let n = st.raw_execute().map_err(err)?;
                         let kw = openvclient_core::sqltext::leading_keyword(&sql);
-                        Ok(if matches!(kw.as_str(), "INSERT" | "UPDATE" | "DELETE" | "REPLACE") {
-                            StatementOutcome::Affected(n as u64)
-                        } else {
-                            StatementOutcome::Done(format!("{kw} completed"))
-                        })
+                        Ok(if matches!(kw.as_str(), "INSERT" | "UPDATE" | "DELETE" | "REPLACE") { StatementOutcome::Affected(n as u64) } else { StatementOutcome::Done(format!("{kw} completed")) })
                     }
                 })();
                 let failed = outcome.is_err();
@@ -726,11 +630,7 @@ impl SqlConsole for SqliteConsole {
         tokio::task::spawn_blocking(move || {
             let c = conn.lock();
             let mut st = c.prepare(&statement).map_err(err)?;
-            let rows: Vec<(i64, i64, String)> = st
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(3)?)))
-                .map_err(err)?
-                .collect::<std::result::Result<_, _>>()
-                .map_err(err)?;
+            let rows: Vec<(i64, i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(3)?))).map_err(err)?.collect::<std::result::Result<_, _>>().map_err(err)?;
             let raw = rows.iter().map(|r| format!("{} {} {}", r.0, r.1, r.2)).collect::<Vec<_>>().join("\n");
             Ok(ExplainResult { statement, raw, tree: Some(sqlite_plan_tree(&rows)), table: None, summary: Vec::new() })
         })
@@ -766,9 +666,7 @@ mod tests {
         let path = dir.join("t.db");
         let _ = std::fs::remove_file(&path);
         let s = session(path.to_str().unwrap()).await;
-        s.run(None, "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT NOT NULL, score REAL); CREATE TABLE nokey(a TEXT); CREATE VIEW v AS SELECT name FROM users;")
-            .await
-            .unwrap();
+        s.run(None, "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT NOT NULL, score REAL); CREATE TABLE nokey(a TEXT); CREATE VIEW v AS SELECT name FROM users;").await.unwrap();
 
         let console = s.open_console(None).await.unwrap();
         let stmts = openvclient_core::sqltext::split_statements(Dialect::Sqlite, "INSERT INTO users(name, score) VALUES ('ann', 1.5), ('bob', 2); SELECT * FROM users ORDER BY id;");
@@ -785,10 +683,7 @@ mod tests {
         assert_eq!(tables.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), vec!["nokey", "users"]);
 
         let p = ObjPath::default().with_schema("main").with_name("users");
-        let page = s
-            .table_page(TableQuery { path: p.clone(), filter: Some("score > 1".into()), order_by: vec![("name".into(), SortDir::Desc)], limit: 10, offset: 0 })
-            .await
-            .unwrap();
+        let page = s.table_page(TableQuery { path: p.clone(), filter: Some("score > 1".into()), order_by: vec![("name".into(), SortDir::Desc)], limit: 10, offset: 0 }).await.unwrap();
         assert_eq!(page.key_columns, vec!["id"]);
         assert_eq!(page.rows.rows[0][1], Value::Text("bob".into()));
         let id = page.rows.rows[0][0].clone();

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use openvclient_core::resource::*;
-use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, ResultSet, Result, ServerInfo, ServiceSession, SessionHandle, Value};
+use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 use suppaftp::list::ListParser;
 use suppaftp::tokio::{AsyncFtpStream, AsyncRustlsConnector, AsyncRustlsFtpStream};
 use suppaftp::{FtpError, Status};
@@ -30,12 +30,22 @@ impl Default for FtpDriver {
                 fields: vec![
                     FieldSpec::text("host", "Host").default("localhost").required(),
                     FieldSpec::text("port", "Port").kind(FieldKind::Number).default("21"),
-                    FieldSpec::text("security", "Security").kind(FieldKind::Choice(&["ftps", "ftps_implicit", "plain"])).default("ftps").help("ftps: explicit TLS (AUTH TLS on port 21) · ftps_implicit: TLS from the first byte (usually port 990) · plain: unencrypted FTP, credentials sent in clear text"),
+                    FieldSpec::text("security", "Security")
+                        .kind(FieldKind::Choice(&["ftps", "ftps_implicit", "plain"]))
+                        .default("ftps")
+                        .help("ftps: explicit TLS (AUTH TLS on port 21) · ftps_implicit: TLS from the first byte (usually port 990) · plain: unencrypted FTP, credentials sent in clear text"),
                     FieldSpec::text("login", "Login").kind(FieldKind::Choice(&["password", "anonymous"])).default("password").help("anonymous: user 'anonymous' with an e-mail style password"),
                     FieldSpec::text("user", "User").show_if("login", &["password"]),
                     FieldSpec::text("password", "Password").kind(FieldKind::Secret).show_if("login", &["password"]),
-                    FieldSpec::text("verify_cert", "Verify certificate").kind(FieldKind::Bool).default("true").show_if("security", &["ftps", "ftps_implicit"]).help("Turn off only for servers with self-signed certificates you trust"),
-                    FieldSpec::text("client_cert", "Client certificate (PEM)").kind(FieldKind::File { save: false, filters: &["pem", "crt"] }).advanced().help("For servers that require TLS client authentication"),
+                    FieldSpec::text("verify_cert", "Verify certificate")
+                        .kind(FieldKind::Bool)
+                        .default("true")
+                        .show_if("security", &["ftps", "ftps_implicit"])
+                        .help("Turn off only for servers with self-signed certificates you trust"),
+                    FieldSpec::text("client_cert", "Client certificate (PEM)")
+                        .kind(FieldKind::File { save: false, filters: &["pem", "crt"] })
+                        .advanced()
+                        .help("For servers that require TLS client authentication"),
                     FieldSpec::text("client_key", "Client key (PEM)").kind(FieldKind::File { save: false, filters: &["pem", "key"] }).advanced(),
                     FieldSpec::text("root", "Start folder").placeholder("login folder"),
                     FieldSpec::text("active", "Active mode").kind(FieldKind::Bool).default("false").advanced().help("Off = passive mode (works through NAT and firewalls)"),
@@ -61,10 +71,20 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for NoVerify {
     ) -> std::result::Result<tokio_rustls::rustls::client::danger::ServerCertVerified, tokio_rustls::rustls::Error> {
         Ok(tokio_rustls::rustls::client::danger::ServerCertVerified::assertion())
     }
-    fn verify_tls12_signature(&self, m: &[u8], c: &tokio_rustls::rustls::pki_types::CertificateDer<'_>, d: &tokio_rustls::rustls::DigitallySignedStruct) -> std::result::Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
+    fn verify_tls12_signature(
+        &self,
+        m: &[u8],
+        c: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
+        d: &tokio_rustls::rustls::DigitallySignedStruct,
+    ) -> std::result::Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
         tokio_rustls::rustls::crypto::verify_tls12_signature(m, c, d, &self.0.signature_verification_algorithms)
     }
-    fn verify_tls13_signature(&self, m: &[u8], c: &tokio_rustls::rustls::pki_types::CertificateDer<'_>, d: &tokio_rustls::rustls::DigitallySignedStruct) -> std::result::Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
+    fn verify_tls13_signature(
+        &self,
+        m: &[u8],
+        c: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
+        d: &tokio_rustls::rustls::DigitallySignedStruct,
+    ) -> std::result::Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
         tokio_rustls::rustls::crypto::verify_tls13_signature(m, c, d, &self.0.signature_verification_algorithms)
     }
     fn supported_verify_schemes(&self) -> Vec<tokio_rustls::rustls::SignatureScheme> {
@@ -139,7 +159,9 @@ impl Target {
             None => Ok(builder.with_no_client_auth()),
             Some((cert, key)) => {
                 use rustls::pki_types::pem::PemObject;
-                let certs = rustls::pki_types::CertificateDer::pem_file_iter(cert).and_then(|i| i.collect::<std::result::Result<Vec<_>, _>>()).map_err(|e| Error::invalid(format!("Client certificate {}: {e}", cert.display())))?;
+                let certs = rustls::pki_types::CertificateDer::pem_file_iter(cert)
+                    .and_then(|i| i.collect::<std::result::Result<Vec<_>, _>>())
+                    .map_err(|e| Error::invalid(format!("Client certificate {}: {e}", cert.display())))?;
                 let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key).map_err(|e| Error::invalid(format!("Client key {}: {e}", key.display())))?;
                 builder.with_client_auth_cert(certs, key).map_err(|e| Error::invalid(format!("Client certificate: {e}")))
             }
@@ -228,7 +250,19 @@ impl Driver for FtpDriver {
         let info = ServerInfo {
             product: if target.security == Security::Plain { "FTP server".into() } else { "FTPS server".into() },
             version: String::new(),
-            details: vec![("Welcome".into(), welcome), ("System".into(), syst), ("Security".into(), match target.security { Security::Plain => "none (clear text)".into(), Security::Explicit => format!("explicit TLS{}", if target.verify { "" } else { ", certificate not verified" }), Security::Implicit => format!("implicit TLS{}", if target.verify { "" } else { ", certificate not verified" }) }), ("Start folder".into(), home.clone())],
+            details: vec![
+                ("Welcome".into(), welcome),
+                ("System".into(), syst),
+                (
+                    "Security".into(),
+                    match target.security {
+                        Security::Plain => "none (clear text)".into(),
+                        Security::Explicit => format!("explicit TLS{}", if target.verify { "" } else { ", certificate not verified" }),
+                        Security::Implicit => format!("implicit TLS{}", if target.verify { "" } else { ", certificate not verified" }),
+                    },
+                ),
+                ("Start folder".into(), home.clone()),
+            ],
         };
         Ok(SessionHandle::Resource(Arc::new(FtpSession { target, conn: Mutex::new(Some(c)), home, read_only: p.read_only, info })))
     }
@@ -291,11 +325,12 @@ impl FtpSession {
 
     async fn ls(&self, dir: &str) -> Result<Vec<Entry>> {
         let d = dir.to_string();
-        let lines = self.with(move |c| {
-            let d = d.clone();
-            Box::pin(async move { on!(c, f => f.list(Some(&d)).await.map_err(ftp_err)) })
-        })
-        .await?;
+        let lines = self
+            .with(move |c| {
+                let d = d.clone();
+                Box::pin(async move { on!(c, f => f.list(Some(&d)).await.map_err(ftp_err)) })
+            })
+            .await?;
         let mut v = parse_listing(&lines);
         v.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
         Ok(v)
@@ -390,7 +425,12 @@ impl ResourceSession for FtpSession {
             let f = opts.filter.trim().to_lowercase();
             let mut rs = ResultSet::new(vec![ColumnMeta::new("name", "text"), ColumnMeta::new("type", "text"), ColumnMeta::new("size", "int8"), ColumnMeta::new("modified", "text")]);
             for e in self.ls(dir).await?.into_iter().filter(|e| f.is_empty() || e.name.to_lowercase().contains(&f)) {
-                rs.rows.push(vec![Value::Text(e.name), Value::Text(if e.dir { "folder" } else { "file" }.into()), if e.dir { Value::Null } else { Value::Int(e.size as i64) }, e.modified.map(Value::Text).unwrap_or(Value::Null)]);
+                rs.rows.push(vec![
+                    Value::Text(e.name),
+                    Value::Text(if e.dir { "folder" } else { "file" }.into()),
+                    if e.dir { Value::Null } else { Value::Int(e.size as i64) },
+                    e.modified.map(Value::Text).unwrap_or(Value::Null),
+                ]);
             }
             let n = rs.rows.len();
             return Ok(Content::TableWithNote(rs, format!("{n} item(s) in {dir}")));

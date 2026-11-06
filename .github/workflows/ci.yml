@@ -27,9 +27,6 @@ jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
-    # The tree is not rustfmt-clean yet. Remove this line once `cargo fmt --all`
-    # has been run (and a rustfmt.toml agreed on) so formatting becomes blocking.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

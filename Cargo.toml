@@ -43,3 +43,7 @@ strip = true
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[workspace.lints.clippy]
+# Long closure/channel types are clearer inline than as one-off aliases.
+type_complexity = "allow"

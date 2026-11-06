@@ -138,10 +138,7 @@ impl ObjectKind {
 
     /// Objects whose rows can be browsed in a data grid.
     pub fn has_rows(self) -> bool {
-        matches!(
-            self,
-            ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView | ObjectKind::ForeignTable
-        )
+        matches!(self, ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView | ObjectKind::ForeignTable)
     }
 
     /// SQL keyword used by DROP statements.

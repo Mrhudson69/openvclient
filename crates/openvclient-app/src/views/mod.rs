@@ -80,30 +80,25 @@ pub fn header(ui: &mut egui::Ui, icon: MaterialIcon, title: &str, subtitle: &str
 /// Error block shown inline, next to what failed.
 pub fn error_box(ui: &mut egui::Ui, e: &openvclient_core::Error) {
     let t = theme::tokens(ui);
-    egui::Frame::new()
-        .fill(t.destructive.gamma_multiply(0.12))
-        .stroke(egui::Stroke::new(1.0, t.destructive.gamma_multiply(0.5)))
-        .corner_radius(6)
-        .inner_margin(10)
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(String::from(ICON_ERROR)).color(t.destructive));
-                ui.label(RichText::new(&e.message).color(t.destructive).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(String::from(ICON_CONTENT_COPY)).on_hover_text("Copy diagnostics").clicked() {
-                        ui.ctx().copy_text(format!("OpenVClient {}\n{}", env!("CARGO_PKG_VERSION"), e.diagnostics()));
-                    }
-                });
+    egui::Frame::new().fill(t.destructive.gamma_multiply(0.12)).stroke(egui::Stroke::new(1.0, t.destructive.gamma_multiply(0.5))).corner_radius(6).inner_margin(10).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(String::from(ICON_ERROR)).color(t.destructive));
+            ui.label(RichText::new(&e.message).color(t.destructive).strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button(String::from(ICON_CONTENT_COPY)).on_hover_text("Copy diagnostics").clicked() {
+                    ui.ctx().copy_text(format!("OpenVClient {}\n{}", env!("CARGO_PKG_VERSION"), e.diagnostics()));
+                }
             });
-            if let Some(d) = &e.detail {
-                ui.label(RichText::new(d).monospace().small());
-            }
-            if let Some(h) = e.hint() {
-                ui.add_space(4.0);
-                ui.label(RichText::new(format!("{}  {h}", String::from(ICON_LIGHTBULB))).color(t.fg));
-            }
         });
+        if let Some(d) = &e.detail {
+            ui.label(RichText::new(d).monospace().small());
+        }
+        if let Some(h) = e.hint() {
+            ui.add_space(4.0);
+            ui.label(RichText::new(format!("{}  {h}", String::from(ICON_LIGHTBULB))).color(t.fg));
+        }
+    });
 }
 
 /// "Not available for this engine" note (never a fake control).

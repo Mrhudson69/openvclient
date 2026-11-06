@@ -103,11 +103,8 @@ fn highlight(dialect: Dialect, text: &str, font: FontId, dark: bool) -> LayoutJo
 
 /// Map `alias -> table` from FROM/JOIN clauses: `FROM orders o`, `JOIN x AS y`.
 fn aliases(dialect: Dialect, text: &str) -> Vec<(String, String)> {
-    let toks: Vec<String> = tokenize(dialect, text)
-        .into_iter()
-        .filter(|(k, _)| !matches!(k, TokenKind::Whitespace | TokenKind::Comment))
-        .map(|(_, s)| text[s.start..s.end].trim_matches(['"', '`']).to_string())
-        .collect();
+    let toks: Vec<String> =
+        tokenize(dialect, text).into_iter().filter(|(k, _)| !matches!(k, TokenKind::Whitespace | TokenKind::Comment)).map(|(_, s)| text[s.start..s.end].trim_matches(['"', '`']).to_string()).collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < toks.len() {
@@ -124,10 +121,11 @@ fn aliases(dialect: Dialect, text: &str) -> Vec<(String, String)> {
             if toks.get(k).is_some_and(|t| t.eq_ignore_ascii_case("AS")) {
                 k += 1;
             }
-            if let Some(alias) = toks.get(k) {
-                if alias.chars().all(|c| c.is_alphanumeric() || c == '_') && !dialect.is_keyword(alias) {
-                    out.push((alias.clone(), table.clone()));
-                }
+            if let Some(alias) = toks.get(k)
+                && alias.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && !dialect.is_keyword(alias)
+            {
+                out.push((alias.clone(), table.clone()));
             }
             out.push((table.clone(), table));
         }
@@ -191,15 +189,7 @@ fn build_items(dialect: Dialect, catalog: Option<&Catalog>, text: &str, prefix: 
     items
 }
 
-pub fn sql_editor(
-    ui: &mut egui::Ui,
-    id: egui::Id,
-    text: &mut String,
-    dialect: Dialect,
-    catalog: Option<&Catalog>,
-    st: &mut EditorState,
-    font_size: f32,
-) -> EditorOutput {
+pub fn sql_editor(ui: &mut egui::Ui, id: egui::Id, text: &mut String, dialect: Dialect, catalog: Option<&Catalog>, st: &mut EditorState, font_size: f32) -> EditorOutput {
     let focused = ui.memory(|m| m.has_focus(id));
     let mut accept = std::mem::take(&mut st.accept_next);
     if focused && st.completion.is_some() {
@@ -240,30 +230,21 @@ pub fn sql_editor(
     };
 
     // Apply an accepted completion before drawing so the edit shows this frame.
-    if accept {
-        if let Some(c) = st.completion.take() {
-            if let Some(item) = c.items.get(c.selected) {
-                let bs = char_to_byte(text, c.start);
-                let be = char_to_byte(text, c.end);
-                text.replace_range(bs..be, &item.label);
-                let new_cursor = c.start + item.label.chars().count();
-                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
-                    state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(new_cursor))));
-                    state.store(ui.ctx(), id);
-                }
-            }
+    if accept
+        && let Some(c) = st.completion.take()
+        && let Some(item) = c.items.get(c.selected)
+    {
+        let bs = char_to_byte(text, c.start);
+        let be = char_to_byte(text, c.end);
+        text.replace_range(bs..be, &item.label);
+        let new_cursor = c.start + item.label.chars().count();
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
+            state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(new_cursor))));
+            state.store(ui.ctx(), id);
         }
     }
 
-    let out = egui::TextEdit::multiline(text)
-        .id(id)
-        .code_editor()
-        .font(FontId::monospace(font_size))
-        .desired_width(f32::INFINITY)
-        .desired_rows(12)
-        .lock_focus(true)
-        .layouter(&mut layouter)
-        .show(ui);
+    let out = egui::TextEdit::multiline(text).id(id).code_editor().font(FontId::monospace(font_size)).desired_width(f32::INFINITY).desired_rows(12).lock_focus(true).layouter(&mut layouter).show(ui);
     if st.focus {
         out.response.request_focus();
         st.focus = false;
@@ -303,11 +284,9 @@ pub fn sql_editor(
         };
         if explicit || typed_word {
             let items = build_items(dialect, catalog, text, &prefix, qualifier.as_deref());
-            st.completion = (!items.is_empty()).then(|| Completion { items, selected: 0, start: s, end: ci });
-        } else if changed || st.completion.as_ref().is_some_and(|c| c.end != ci) {
-            if !typed_word {
-                st.completion = None;
-            }
+            st.completion = (!items.is_empty()).then_some(Completion { items, selected: 0, start: s, end: ci });
+        } else if (changed || st.completion.as_ref().is_some_and(|c| c.end != ci)) && !typed_word {
+            st.completion = None;
         }
     } else if !out.response.has_focus() {
         st.completion = None;
@@ -317,31 +296,28 @@ pub fn sql_editor(
     if let (Some(c), Some(r)) = (&st.completion, range) {
         let rect = out.galley.pos_from_cursor(r.primary).translate(out.galley_pos.to_vec2());
         let mut clicked = None;
-        egui::Area::new(id.with("completion"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(rect.left_bottom() + egui::vec2(0.0, 2.0))
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(260.0);
-                    let start = c.selected.saturating_sub(9);
-                    for (i, item) in c.items.iter().enumerate().skip(start).take(10) {
-                        let sel = i == c.selected;
-                        let resp = ui
-                            .horizontal(|ui| {
-                                let r = ui.selectable_label(sel, RichText::new(&item.label).monospace());
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.weak(format!("{} {}", item.detail, item.kind.tag()));
-                                });
-                                r
-                            })
-                            .inner;
-                        if resp.clicked() {
-                            clicked = Some(i);
-                        }
+        egui::Area::new(id.with("completion")).order(egui::Order::Foreground).fixed_pos(rect.left_bottom() + egui::vec2(0.0, 2.0)).show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(260.0);
+                let start = c.selected.saturating_sub(9);
+                for (i, item) in c.items.iter().enumerate().skip(start).take(10) {
+                    let sel = i == c.selected;
+                    let resp = ui
+                        .horizontal(|ui| {
+                            let r = ui.selectable_label(sel, RichText::new(&item.label).monospace());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.weak(format!("{} {}", item.detail, item.kind.tag()));
+                            });
+                            r
+                        })
+                        .inner;
+                    if resp.clicked() {
+                        clicked = Some(i);
                     }
-                    ui.weak(format!("{} matches · ↑↓ Enter Tab · Esc", c.items.len()));
-                });
+                }
+                ui.weak(format!("{} matches · ↑↓ Enter Tab · Esc", c.items.len()));
             });
+        });
         if let Some(i) = clicked {
             if let Some(c) = st.completion.as_mut() {
                 c.selected = i;

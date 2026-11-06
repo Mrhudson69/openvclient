@@ -46,7 +46,10 @@ pub enum FieldKind {
     /// Stored in the OS keychain, never in the profile file.
     Secret,
     /// A local file path; `save` picks a save dialog instead of open.
-    File { save: bool, filters: &'static [&'static str] },
+    File {
+        save: bool,
+        filters: &'static [&'static str],
+    },
     Bool,
     Choice(&'static [&'static str]),
 }
@@ -70,17 +73,7 @@ pub struct FieldSpec {
 
 impl FieldSpec {
     pub const fn text(key: &'static str, label: &'static str) -> Self {
-        Self {
-            key,
-            label,
-            kind: FieldKind::Text,
-            default: "",
-            placeholder: "",
-            required: false,
-            help: "",
-            advanced: false,
-            show_if: None,
-        }
+        Self { key, label, kind: FieldKind::Text, default: "", placeholder: "", required: false, help: "", advanced: false, show_if: None }
     }
     pub const fn show_if(mut self, key: &'static str, values: &'static [&'static str]) -> Self {
         self.show_if = Some((key, values));

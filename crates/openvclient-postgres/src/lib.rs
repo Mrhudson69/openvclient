@@ -16,8 +16,7 @@ use futures::StreamExt;
 use openvclient_core::sql::*;
 use openvclient_core::sqltext::Dialect;
 use openvclient_core::{
-    Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, ErrorKind, FieldKind, FieldSpec, Result,
-    ResultSet, ServerInfo, ServiceSession, SessionHandle, Value, network_fields,
+    Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, ErrorKind, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value, network_fields,
 };
 use parking_lot::Mutex;
 use postgres_native_tls::MakeTlsConnector;
@@ -42,16 +41,7 @@ impl Default for PostgresDriver {
         );
         fields.push(FieldSpec::text("connect_timeout", "Connect timeout (s)").kind(FieldKind::Number).default("10").advanced());
         fields.push(FieldSpec::text("application_name", "Application name").default("OpenVClient").advanced());
-        Self {
-            info: DriverInfo {
-                id: "postgres",
-                name: "PostgreSQL",
-                category: Category::Relational,
-                description: "PostgreSQL 10+ and wire-compatible servers",
-                badge: "PG",
-                fields,
-            },
-        }
+        Self { info: DriverInfo { id: "postgres", name: "PostgreSQL", category: Category::Relational, description: "PostgreSQL 10+ and wire-compatible servers", badge: "PG", fields } }
     }
 }
 
@@ -106,17 +96,11 @@ impl PgTarget {
 
     pub fn config(&self, database: &str) -> tokio_postgres::Config {
         let mut c = tokio_postgres::Config::new();
-        c.host(&self.host)
-            .port(self.port)
-            .user(&self.user)
-            .dbname(database)
-            .application_name(&self.application_name)
-            .connect_timeout(self.connect_timeout)
-            .ssl_mode(match self.sslmode.as_str() {
-                "disable" => SslMode::Disable,
-                "require" | "verify-full" | "verify-ca" => SslMode::Require,
-                _ => SslMode::Prefer,
-            });
+        c.host(&self.host).port(self.port).user(&self.user).dbname(database).application_name(&self.application_name).connect_timeout(self.connect_timeout).ssl_mode(match self.sslmode.as_str() {
+            "disable" => SslMode::Disable,
+            "require" | "verify-full" | "verify-ca" => SslMode::Require,
+            _ => SslMode::Prefer,
+        });
         if let Some(pw) = &self.password {
             c.password(pw);
         }
@@ -176,11 +160,7 @@ pub(crate) fn pg_err(e: tokio_postgres::Error) -> Error {
     let text = e.to_string();
     let source = std::error::Error::source(&e).map(|s| s.to_string()).unwrap_or_default();
     let msg = if source.is_empty() { text } else { format!("{text}: {source}") };
-    if e.is_closed() || msg.contains("connect") || msg.contains("timed out") || msg.contains("refused") {
-        Error::connection(msg)
-    } else {
-        Error::server(msg)
-    }
+    if e.is_closed() || msg.contains("connect") || msg.contains("timed out") || msg.contains("refused") { Error::connection(msg) } else { Error::server(msg) }
 }
 
 fn pool_err(e: deadpool_postgres::PoolError) -> Error {
@@ -242,17 +222,8 @@ impl PgSession {
         if let Some(p) = self.pools.lock().get(database) {
             return Ok(p.clone());
         }
-        let mgr = Manager::from_config(
-            self.target.config(database),
-            self.target.tls()?,
-            ManagerConfig { recycling_method: RecyclingMethod::Fast },
-        );
-        let pool = Pool::builder(mgr)
-            .max_size(4)
-            .wait_timeout(Some(Duration::from_secs(30)))
-            .runtime(deadpool_postgres::Runtime::Tokio1)
-            .build()
-            .map_err(|e| Error::connection(e.to_string()))?;
+        let mgr = Manager::from_config(self.target.config(database), self.target.tls()?, ManagerConfig { recycling_method: RecyclingMethod::Fast });
+        let pool = Pool::builder(mgr).max_size(4).wait_timeout(Some(Duration::from_secs(30))).runtime(deadpool_postgres::Runtime::Tokio1).build().map_err(|e| Error::connection(e.to_string()))?;
         self.pools.lock().insert(database.to_string(), pool.clone());
         Ok(pool)
     }
@@ -274,41 +245,22 @@ impl PgSession {
     }
 
     pub fn version_num(&self) -> i32 {
-        self.info
-            .lock()
-            .details
-            .iter()
-            .find(|(k, _)| k == "Version number")
-            .and_then(|(_, v)| v.parse().ok())
-            .unwrap_or(0)
+        self.info.lock().details.iter().find(|(k, _)| k == "Version number").and_then(|(_, v)| v.parse().ok()).unwrap_or(0)
     }
 
     /// Typed query returning every column as text (callers cast to text).
-    pub async fn text_rows(
-        &self,
-        database: Option<&str>,
-        sql: &str,
-        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
-    ) -> Result<Vec<Vec<Option<String>>>> {
+    pub async fn text_rows(&self, database: Option<&str>, sql: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<Vec<Vec<Option<String>>>> {
         let client = self.client(database).await?;
         let rows = client.query(sql, params).await.map_err(pg_err)?;
         Ok(rows.iter().map(|r| (0..r.len()).map(|i| r.get::<_, Option<String>>(i)).collect()).collect())
     }
 
-    pub async fn text_result(
-        &self,
-        database: Option<&str>,
-        sql: &str,
-        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
-    ) -> Result<ResultSet> {
+    pub async fn text_result(&self, database: Option<&str>, sql: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<ResultSet> {
         let client = self.client(database).await?;
         let stmt = client.prepare(sql).await.map_err(pg_err)?;
         let rows = client.query(&stmt, params).await.map_err(pg_err)?;
         let cols: Vec<&str> = stmt.columns().iter().map(|c| c.name()).collect();
-        Ok(ResultSet::from_text_rows(
-            &cols,
-            rows.iter().map(|r| (0..r.len()).map(|i| r.get::<_, Option<String>>(i)).collect()).collect(),
-        ))
+        Ok(ResultSet::from_text_rows(&cols, rows.iter().map(|r| (0..r.len()).map(|i| r.get::<_, Option<String>>(i)).collect()).collect()))
     }
 }
 
@@ -337,13 +289,9 @@ pub(crate) async fn simple_rows(client: &Client, sql: &str, max: usize, types: O
             }
             SimpleQueryMessage::Row(row) => {
                 seen += 1;
-                let set = rs.get_or_insert_with(|| {
-                    ResultSet::new(row.columns().iter().map(|c| ColumnMeta::new(c.name(), "")).collect())
-                });
+                let set = rs.get_or_insert_with(|| ResultSet::new(row.columns().iter().map(|c| ColumnMeta::new(c.name(), "")).collect()));
                 if set.rows.len() < max {
-                    set.rows.push(
-                        (0..row.len()).map(|i| row.get(i).map(|v| Value::Text(v.to_string())).unwrap_or(Value::Null)).collect(),
-                    );
+                    set.rows.push((0..row.len()).map(|i| row.get(i).map(|v| Value::Text(v.to_string())).unwrap_or(Value::Null)).collect());
                 } else {
                     set.truncated = true;
                 }
@@ -470,10 +418,7 @@ impl SqlSession for PgSession {
     async fn run(&self, database: Option<&str>, sql: &str) -> Result<u64> {
         let c = self.client(database).await?;
         let msgs = c.simple_query(sql).await.map_err(pg_err)?;
-        Ok(msgs
-            .iter()
-            .filter_map(|m| if let SimpleQueryMessage::CommandComplete(n) = m { Some(*n) } else { None })
-            .sum())
+        Ok(msgs.iter().filter_map(|m| if let SimpleQueryMessage::CommandComplete(n) = m { Some(*n) } else { None }).sum())
     }
 
     async fn drop_object(&self, kind: ObjectKind, path: &ObjPath, cascade: bool) -> Result<()> {

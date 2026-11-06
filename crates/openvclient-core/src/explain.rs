@@ -73,10 +73,8 @@ fn pg_node(p: &serde_json::Value) -> PlanNode {
     let loops = f("Actual Loops");
     let actual_ms = f("Actual Total Time").map(|t| t * loops.unwrap_or(1.0));
     let mut props = Vec::new();
-    const SKIP: &[&str] = &[
-        "Node Type", "Plans", "Startup Cost", "Total Cost", "Plan Rows", "Actual Rows", "Actual Total Time",
-        "Actual Loops", "Relation Name", "Alias", "Parallel Aware", "Async Capable",
-    ];
+    const SKIP: &[&str] =
+        &["Node Type", "Plans", "Startup Cost", "Total Cost", "Plan Rows", "Actual Rows", "Actual Total Time", "Actual Loops", "Relation Name", "Alias", "Parallel Aware", "Async Capable"];
     if let Some(obj) = p.as_object() {
         for (k, v) in obj {
             if SKIP.contains(&k.as_str()) {
@@ -84,39 +82,20 @@ fn pg_node(p: &serde_json::Value) -> PlanNode {
             }
             let text = match v {
                 serde_json::Value::String(s) => s.clone(),
-                serde_json::Value::Array(a) => {
-                    a.iter().map(|x| x.as_str().map(str::to_owned).unwrap_or_else(|| x.to_string())).collect::<Vec<_>>().join(", ")
-                }
+                serde_json::Value::Array(a) => a.iter().map(|x| x.as_str().map(str::to_owned).unwrap_or_else(|| x.to_string())).collect::<Vec<_>>().join(", "),
                 other => other.to_string(),
             };
             props.push((k.clone(), text));
         }
     }
-    let children = p
-        .get("Plans")
-        .and_then(|x| x.as_array())
-        .map(|a| a.iter().map(pg_node).collect())
-        .unwrap_or_default();
-    PlanNode {
-        title,
-        startup_cost: f("Startup Cost"),
-        total_cost: f("Total Cost"),
-        plan_rows: f("Plan Rows"),
-        actual_rows: f("Actual Rows"),
-        actual_ms,
-        loops,
-        props,
-        children,
-    }
+    let children = p.get("Plans").and_then(|x| x.as_array()).map(|a| a.iter().map(pg_node).collect()).unwrap_or_default();
+    PlanNode { title, startup_cost: f("Startup Cost"), total_cost: f("Total Cost"), plan_rows: f("Plan Rows"), actual_rows: f("Actual Rows"), actual_ms, loops, props, children }
 }
 
 /// Build a tree from SQLite `EXPLAIN QUERY PLAN` rows `(id, parent, detail)`.
 pub fn sqlite_plan_tree(rows: &[(i64, i64, String)]) -> PlanNode {
     fn build(parent: i64, rows: &[(i64, i64, String)]) -> Vec<PlanNode> {
-        rows.iter()
-            .filter(|r| r.1 == parent)
-            .map(|r| PlanNode { title: r.2.clone(), children: build(r.0, rows), ..Default::default() })
-            .collect()
+        rows.iter().filter(|r| r.1 == parent).map(|r| PlanNode { title: r.2.clone(), children: build(r.0, rows), ..Default::default() }).collect()
     }
     PlanNode { title: "QUERY PLAN".into(), children: build(0, rows), ..Default::default() }
 }

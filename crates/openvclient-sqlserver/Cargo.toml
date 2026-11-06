@@ -29,3 +29,6 @@ tiberius = { version = "0.13", default-features = false, features = ["tds73", "r
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

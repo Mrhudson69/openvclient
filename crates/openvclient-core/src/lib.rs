@@ -7,11 +7,11 @@
 //! session reports precise [`SqlCapabilities`]-style flags so the UI only
 //! offers actions the engine really implements.
 
+pub mod containers;
 pub mod driver;
 pub mod error;
 pub mod explain;
 pub mod kv;
-pub mod containers;
 pub mod profile;
 pub mod registry;
 pub mod resource;

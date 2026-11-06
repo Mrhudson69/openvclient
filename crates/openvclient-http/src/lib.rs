@@ -5,7 +5,6 @@ pub mod clickhouse;
 pub mod elastic;
 pub mod rabbitmq;
 
-
 use std::time::Duration;
 
 use openvclient_core::{ConnectParams, Error, Result};
@@ -70,7 +69,8 @@ impl Http {
         let (status, body) = self.send(r).await?;
         let v: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::String(body.clone()));
         if status >= 400 {
-            let reason = v.pointer("/error/reason").and_then(|x| x.as_str()).map(str::to_owned).or_else(|| v.get("reason").and_then(|x| x.as_str()).map(str::to_owned)).unwrap_or_else(|| first_line(&body));
+            let reason =
+                v.pointer("/error/reason").and_then(|x| x.as_str()).map(str::to_owned).or_else(|| v.get("reason").and_then(|x| x.as_str()).map(str::to_owned)).unwrap_or_else(|| first_line(&body));
             return Err(Error::server(format!("HTTP {status}: {reason}")).with_detail(body.chars().take(2000).collect::<String>()));
         }
         Ok(v)

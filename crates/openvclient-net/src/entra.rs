@@ -22,10 +22,24 @@ pub const DEFAULT_PUBLIC_CLIENT: &str = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
 
 #[derive(Clone)]
 pub enum Flow {
-    Password { tenant: String, client_id: String, user: String, password: String },
-    ServicePrincipal { tenant: String, client_id: String, secret: String },
-    ManagedIdentity { client_id: Option<String> },
-    DeviceCode { tenant: String, client_id: String },
+    Password {
+        tenant: String,
+        client_id: String,
+        user: String,
+        password: String,
+    },
+    ServicePrincipal {
+        tenant: String,
+        client_id: String,
+        secret: String,
+    },
+    ManagedIdentity {
+        client_id: Option<String>,
+    },
+    DeviceCode {
+        tenant: String,
+        client_id: String,
+    },
     /// Environment service principal, then managed identity, then Azure CLI.
     Default,
 }
@@ -95,7 +109,8 @@ pub async fn acquire(flow: &Flow, aud: Audience, notifier: Option<&Notifier>) ->
             let deadline = Instant::now() + Duration::from_secs(start.get("expires_in").and_then(|e| e.as_u64()).unwrap_or(900));
             while Instant::now() < deadline {
                 tokio::time::sleep(Duration::from_secs(interval)).await;
-                let v = post(&format!("{}/token", authority(tenant)), &[("grant_type", "urn:ietf:params:oauth:grant-type:device_code"), ("client_id", client_id), ("device_code", &device_code)]).await?;
+                let v =
+                    post(&format!("{}/token", authority(tenant)), &[("grant_type", "urn:ietf:params:oauth:grant-type:device_code"), ("client_id", client_id), ("device_code", &device_code)]).await?;
                 match v.get("error").and_then(|e| e.as_str()) {
                     Some("authorization_pending") => continue,
                     Some("slow_down") => interval += 5,

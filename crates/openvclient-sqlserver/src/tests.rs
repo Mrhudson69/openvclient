@@ -100,10 +100,7 @@ async fn live_sqlserver() {
     assert!(p.tree.is_some(), "{}", p.raw);
     assert_eq!(s.count_rows(&users, None).await.unwrap(), 2, "analyze must roll back");
 
-    let page = s
-        .table_page(TableQuery { path: users.clone(), filter: Some("name <> N'zed'".into()), order_by: vec![("name".into(), SortDir::Asc)], limit: 50, offset: 0 })
-        .await
-        .unwrap();
+    let page = s.table_page(TableQuery { path: users.clone(), filter: Some("name <> N'zed'".into()), order_by: vec![("name".into(), SortDir::Asc)], limit: 50, offset: 0 }).await.unwrap();
     assert_eq!(page.key_columns, vec!["id"]);
     assert_eq!(page.rows.rows[0][1], Value::Text("ann".into()));
     let ann = page.rows.rows[0][0].clone();
@@ -118,9 +115,7 @@ async fn live_sqlserver() {
     .unwrap();
     assert_eq!(s.count_rows(&users, Some("score = 7.25")).await.unwrap(), 1);
     assert!(s.table_page(TableQuery { path: users.clone(), filter: Some("1=1; DROP TABLE app.users".into()), order_by: vec![], limit: 5, offset: 0 }).await.is_err());
-    let bad = s
-        .apply_changes(&users, vec![RowChange::Insert { values: vec![("name".into(), Some("ok".into()))] }, RowChange::Insert { values: vec![("name".into(), None)] }])
-        .await;
+    let bad = s.apply_changes(&users, vec![RowChange::Insert { values: vec![("name".into(), Some("ok".into()))] }, RowChange::Insert { values: vec![("name".into(), None)] }]).await;
     assert!(bad.is_err());
     assert_eq!(s.count_rows(&users, None).await.unwrap(), 3, "failed batch must roll back");
     let nk = s.table_page(TableQuery { path: base.clone().with_name("nokey"), filter: None, order_by: vec![], limit: 5, offset: 0 }).await.unwrap();
@@ -131,7 +126,9 @@ async fn live_sqlserver() {
     assert!(s.metrics().await.unwrap().iter().any(|m| m.name == "Page life expectancy (s)"));
     let _ = s.drop_principal("openvclient_login", None).await;
     s.create_principal(PrincipalSpec { name: "openvclient_login".into(), password: Some("Str0ng!Passw0rd#".into()), can_login: true, ..Default::default() }).await.unwrap();
-    s.grant(GrantSpec { privileges: vec!["SELECT".into()], target: GrantTarget::Table(users.clone()), principal: "openvclient_login".into(), host: None, with_grant_option: false }, false).await.unwrap();
+    s.grant(GrantSpec { privileges: vec!["SELECT".into()], target: GrantTarget::Table(users.clone()), principal: "openvclient_login".into(), host: None, with_grant_option: false }, false)
+        .await
+        .unwrap();
     let pr = s.privileges("openvclient_login", None).await.unwrap();
     assert!(pr.rows.iter().any(|r| r[2] == Value::Text("SELECT".into())), "{:?}", pr.rows);
     assert!(s.principals().await.unwrap().rows.iter().any(|r| r[0] == Value::Text("openvclient_login".into())));

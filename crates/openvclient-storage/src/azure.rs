@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use openvclient_core::resource::*;
-use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Notifier, ResultSet, Result, ServerInfo, ServiceSession, SessionHandle, Value};
+use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Notifier, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 use openvclient_net::entra::{self, AZURE_STORAGE, DEFAULT_PUBLIC_CLIENT, Flow};
 use parking_lot::Mutex;
 use sha2::Sha256;
@@ -172,7 +172,7 @@ impl Az {
                     } else {
                         return Err(Error::invalid("The connection string has neither AccountKey nor SharedAccessSignature"));
                     };
-                    if account.is_empty() && m.get("blobendpoint").is_none() {
+                    if account.is_empty() && !m.contains_key("blobendpoint") {
                         return Err(Error::invalid("The connection string has no AccountName or BlobEndpoint"));
                     }
                     let account = if account.is_empty() { base.split("//").nth(1).and_then(|h| h.split('.').next()).unwrap_or("").to_string() } else { account };
@@ -187,10 +187,8 @@ impl Az {
                     let host = url.host_str().unwrap_or("");
                     let mut base = format!("{}://{host}{}", url.scheme(), url.port().map(|p| format!(":{p}")).unwrap_or_default());
                     let mut segs: Vec<&str> = url.path().trim_matches('/').split('/').filter(|x| !x.is_empty()).collect();
-                    if host.starts_with("127.") || host == "localhost" {
-                        if !segs.is_empty() {
-                            base = format!("{base}/{}", segs.remove(0));
-                        }
+                    if (host.starts_with("127.") || host == "localhost") && !segs.is_empty() {
+                        base = format!("{base}/{}", segs.remove(0));
                     }
                     let account = host.split('.').next().unwrap_or("").to_string();
                     let mut az = (base, account, Auth::Sas(sas));
@@ -231,7 +229,8 @@ impl Az {
                 (account_base(&a), a, Auth::Entra(Flow::DeviceCode { tenant, client_id: public_client() }))
             }
         };
-        let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).timeout(Duration::from_secs(600)).user_agent("OpenVClient").build().map_err(|e| Error::other(e.to_string()))?;
+        let client =
+            reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).timeout(Duration::from_secs(600)).user_agent("OpenVClient").build().map_err(|e| Error::other(e.to_string()))?;
         Ok(Self { base, account, auth, client, token: Mutex::new(entra::Cache::default()), notifier: p.notifier.clone() })
     }
 
@@ -399,7 +398,13 @@ impl Driver for AzureBlobDriver {
                 az.list(c, "", 1).await?;
             }
             None => {
-                az.containers().await.map_err(|e| if matches!(az.auth, Auth::Anonymous | Auth::Sas(_)) && e.kind == openvclient_core::ErrorKind::Auth { Error::auth(format!("{} (anonymous and container-level SAS access need the Container field)", e.message)) } else { e })?;
+                az.containers().await.map_err(|e| {
+                    if matches!(az.auth, Auth::Anonymous | Auth::Sas(_)) && e.kind == openvclient_core::ErrorKind::Auth {
+                        Error::auth(format!("{} (anonymous and container-level SAS access need the Container field)", e.message))
+                    } else {
+                        e
+                    }
+                })?;
             }
         }
         let method = match &az.auth {
@@ -409,7 +414,11 @@ impl Driver for AzureBlobDriver {
             Auth::Entra(f) => format!("Microsoft Entra ID ({f:?})"),
             Auth::Anonymous => "anonymous".into(),
         };
-        let info = ServerInfo { product: "Azure Blob Storage".into(), version: VERSION.into(), details: vec![("Account".into(), az.account.clone()), ("Endpoint".into(), az.base.clone()), ("Signed in with".into(), method)] };
+        let info = ServerInfo {
+            product: "Azure Blob Storage".into(),
+            version: VERSION.into(),
+            details: vec![("Account".into(), az.account.clone()), ("Endpoint".into(), az.base.clone()), ("Signed in with".into(), method)],
+        };
         Ok(SessionHandle::Resource(Arc::new(AzureSession { az, only_container, read_only: p.read_only, info })))
     }
 }
@@ -480,12 +489,24 @@ impl ResourceSession for AzureSession {
             'c' | 'p' => {
                 let prefix = format!("{key}{}", opts.filter.trim());
                 let (folders, blobs, more) = self.az.list(c, &prefix, (opts.limit as usize).clamp(1, 5000)).await?;
-                let mut rs = ResultSet::new(vec![ColumnMeta::new("name", "text"), ColumnMeta::new("size", "int8"), ColumnMeta::new("last_modified", "text"), ColumnMeta::new("tier", "text"), ColumnMeta::new("content_type", "text")]);
+                let mut rs = ResultSet::new(vec![
+                    ColumnMeta::new("name", "text"),
+                    ColumnMeta::new("size", "int8"),
+                    ColumnMeta::new("last_modified", "text"),
+                    ColumnMeta::new("tier", "text"),
+                    ColumnMeta::new("content_type", "text"),
+                ]);
                 for f in folders {
                     rs.rows.push(vec![Value::Text(f[key.len().min(f.len())..].to_string()), Value::Null, Value::Null, Value::Text("folder".into()), Value::Null]);
                 }
                 for b in blobs {
-                    rs.rows.push(vec![Value::Text(b.name[key.len().min(b.name.len())..].to_string()), Value::Int(b.size as i64), Value::Text(b.modified), Value::Text(b.tier), Value::Text(b.content_type)]);
+                    rs.rows.push(vec![
+                        Value::Text(b.name[key.len().min(b.name.len())..].to_string()),
+                        Value::Int(b.size as i64),
+                        Value::Text(b.modified),
+                        Value::Text(b.tier),
+                        Value::Text(b.content_type),
+                    ]);
                 }
                 let note = format!("{} item(s) in {c}/{key}{}", rs.rows.len(), if more { " · more exist, narrow with the filter" } else { "" });
                 Ok(Content::TableWithNote(rs, note))
@@ -498,7 +519,14 @@ impl ResourceSession for AzureSession {
                 let size: u64 = get("content-length").parse().unwrap_or(0);
                 let ctype = get("content-type");
                 let mut props = vec![("Blob".to_string(), format!("{c}/{key}")), ("Size".into(), format!("{} ({size} bytes)", human(size))), ("Content type".into(), ctype.clone())];
-                for (n, l) in [("x-ms-blob-type", "Blob type"), ("x-ms-access-tier", "Access tier"), ("last-modified", "Last modified"), ("etag", "ETag"), ("x-ms-server-encrypted", "Encrypted"), ("x-ms-lease-status", "Lease")] {
+                for (n, l) in [
+                    ("x-ms-blob-type", "Blob type"),
+                    ("x-ms-access-tier", "Access tier"),
+                    ("last-modified", "Last modified"),
+                    ("etag", "ETag"),
+                    ("x-ms-server-encrypted", "Encrypted"),
+                    ("x-ms-lease-status", "Lease"),
+                ] {
                     let v = get(n);
                     if !v.is_empty() {
                         props.push((l.into(), v.trim_matches('"').to_string()));
@@ -507,7 +535,11 @@ impl ResourceSession for AzureSession {
                 for (n, v) in h.iter().filter(|(n, _)| n.as_str().starts_with("x-ms-meta-")) {
                     props.push((n.as_str().trim_start_matches("x-ms-").to_string(), v.to_str().unwrap_or("").to_string()));
                 }
-                let textual = ctype.starts_with("text/") || ctype.contains("json") || ctype.contains("xml") || ctype.contains("csv") || [".txt", ".json", ".csv", ".log", ".md", ".yml", ".yaml", ".xml", ".sql"].iter().any(|e| key.ends_with(e));
+                let textual = ctype.starts_with("text/")
+                    || ctype.contains("json")
+                    || ctype.contains("xml")
+                    || ctype.contains("csv")
+                    || [".txt", ".json", ".csv", ".log", ".md", ".yml", ".yaml", ".xml", ".sql"].iter().any(|e| key.ends_with(e));
                 if size > 0 && size <= PREVIEW_MAX && textual {
                     let body = self.az.send(reqwest::Method::GET, &path, &[], &[], None, 0).await?.bytes().await.map_err(|e| Error::other(e.to_string()))?;
                     let text = String::from_utf8_lossy(&body).into_owned();
@@ -540,8 +572,14 @@ impl ResourceSession for AzureSession {
         let shared_key = matches!(self.az.auth, Auth::SharedKey(_));
         match kind {
             "" => vec![ActionSpec::new("create_container", "New container…").field(FieldSpec::text("name", "Container name").required().help("3–63 lowercase letters, numbers and hyphens"))],
-            "container" => vec![upload(), ActionSpec::new("mkdir", "New folder…").field(FieldSpec::text("name", "Folder").required()), ActionSpec::new("delete_container", "Delete container").destructive()],
-            "prefix" => vec![upload(), ActionSpec::new("mkdir", "New folder…").field(FieldSpec::text("name", "Folder").required()), ActionSpec::new("delete_prefix", "Delete folder and contents").destructive()],
+            "container" => {
+                vec![upload(), ActionSpec::new("mkdir", "New folder…").field(FieldSpec::text("name", "Folder").required()), ActionSpec::new("delete_container", "Delete container").destructive()]
+            }
+            "prefix" => vec![
+                upload(),
+                ActionSpec::new("mkdir", "New folder…").field(FieldSpec::text("name", "Folder").required()),
+                ActionSpec::new("delete_prefix", "Delete folder and contents").destructive(),
+            ],
             "blob" => {
                 let mut v = vec![ActionSpec::new("download", "Download…").primary().field(FieldSpec::text("file", "Save as").kind(FieldKind::File { save: true, filters: &[] }).required())];
                 if shared_key {
@@ -699,7 +737,13 @@ mod tests {
         let sas_conn = AzureBlobDriver::default().connect(params("sas", Some(url.clone()))).await;
         assert!(sas_conn.is_ok() || sas_conn.as_ref().err().is_some_and(|e| e.kind == openvclient_core::ErrorKind::Auth), "{:?}", sas_conn.err());
         // Connection string for the emulator.
-        AzureBlobDriver::default().connect(params("connection_string", Some(format!("UseDevelopmentStorage=true;DevelopmentStorageProxyUri={}", std::env::var("OPENVCLIENT_AZURITE").unwrap_or_else(|_| "http://127.0.0.1:50000".into()))))).await.unwrap();
+        AzureBlobDriver::default()
+            .connect(params(
+                "connection_string",
+                Some(format!("UseDevelopmentStorage=true;DevelopmentStorageProxyUri={}", std::env::var("OPENVCLIENT_AZURITE").unwrap_or_else(|_| "http://127.0.0.1:50000".into()))),
+            ))
+            .await
+            .unwrap();
         s.run_action("p/ovc-test/docs/", "delete_prefix", Args::new()).await.unwrap();
         s.run_action("c/ovc-test", "delete_container", Args::new()).await.unwrap();
     }

@@ -109,7 +109,14 @@ impl Error {
             "The secure (TLS) connection failed. Try the connection's TLS/SSL option (e.g. require without verification for self-signed certificates), or check the server's certificate."
         } else if has("too many connections") || has("remaining connection slots") || has("max_connections") {
             "The server reached its connection limit. Close idle sessions or raise the limit on the server."
-        } else if has("password authentication failed") || has("access denied") || has("login failed") || has("authentication failed") || has("wrongpass") || has("noauth") || self.kind == ErrorKind::Auth {
+        } else if has("password authentication failed")
+            || has("access denied")
+            || has("login failed")
+            || has("authentication failed")
+            || has("wrongpass")
+            || has("noauth")
+            || self.kind == ErrorKind::Auth
+        {
             "The server rejected the credentials. Check the user and password (and for MySQL the 'user'@'host' the account allows); for SSH tunnels check the SSH login too."
         } else if (has("database") || has("schema")) && (has("does not exist") || has("unknown database") || has("cannot open database")) {
             "The database name is wrong or you lack access to it. Check the Database field in the connection."

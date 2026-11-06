@@ -20,3 +20,6 @@ postgres-native-tls = "0.5"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

@@ -142,9 +142,7 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
             }
             let mut profiles: Vec<ConnectionProfile> = cx.store.ws.profiles.iter().filter(|p| p.folder.trim_matches('/') == f).cloned().collect();
             profiles.sort_by_key(|p| p.name.to_lowercase());
-            let matches_filter = filter.is_empty()
-                || f.to_lowercase().contains(&filter)
-                || cx.store.ws.profiles.iter().any(|p| p.folder.starts_with(&f) && p.name.to_lowercase().contains(&filter));
+            let matches_filter = filter.is_empty() || f.to_lowercase().contains(&filter) || cx.store.ws.profiles.iter().any(|p| p.folder.starts_with(&f) && p.name.to_lowercase().contains(&filter));
             if !matches_filter {
                 continue;
             }
@@ -196,7 +194,17 @@ fn row(ui: &mut egui::Ui, indent: f32, expanded: Option<bool>, icon: egui_materi
 
 /// `trailing` reserves space at the right edge (status dot, PROD marker).
 #[allow(clippy::too_many_arguments)]
-fn row_with_trailing(ui: &mut egui::Ui, indent: f32, expanded: Option<bool>, icon: egui_material_icons::MaterialIcon, icon_color: egui::Color32, label: &str, detail: &str, selected: bool, trailing: f32) -> egui::Response {
+fn row_with_trailing(
+    ui: &mut egui::Ui,
+    indent: f32,
+    expanded: Option<bool>,
+    icon: egui_material_icons::MaterialIcon,
+    icon_color: egui::Color32,
+    label: &str,
+    detail: &str,
+    selected: bool,
+    trailing: f32,
+) -> egui::Response {
     let t = theme::tokens(ui);
     let h = 24.0;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), h), Sense::click());
@@ -223,7 +231,11 @@ fn row_with_trailing(ui: &mut egui::Ui, indent: f32, expanded: Option<bool>, ico
     let max_w = right - x;
     let galley = ui.painter().layout(label.to_string(), font.clone(), t.fg, f32::INFINITY);
     let lw = galley.size().x.min(max_w);
-    ui.painter().with_clip_rect(rect.intersect(egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + max_w, rect.bottom())))).galley(egui::pos2(x, cy - galley.size().y / 2.0), galley, t.fg);
+    ui.painter().with_clip_rect(rect.intersect(egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + max_w, rect.bottom())))).galley(
+        egui::pos2(x, cy - galley.size().y / 2.0),
+        galley,
+        t.fg,
+    );
     if !detail.is_empty() && lw + 40.0 < max_w {
         let dx = x + lw + 8.0;
         let clip = egui::Rect::from_min_max(egui::pos2(dx, rect.top()), egui::pos2(right, rect.bottom()));
@@ -331,11 +343,11 @@ fn connection_menu(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile) {
                 ui.close();
             }
         }
-        if let Some(SessionHandle::KeyValue(_)) = &session {
-            if ui.button(ico(ICON_KEY, "Browse keys")).clicked() {
-                cx.cmd(Cmd::OpenRedis { conn: id, db: p.param("db").parse().unwrap_or(0) });
-                ui.close();
-            }
+        if let Some(SessionHandle::KeyValue(_)) = &session
+            && ui.button(ico(ICON_KEY, "Browse keys")).clicked()
+        {
+            cx.cmd(Cmd::OpenRedis { conn: id, db: p.param("db").parse().unwrap_or(0) });
+            ui.close();
         }
         if let Some(SessionHandle::Resource(r)) = &session {
             if r.supports_terminal() && ui.button(ico(ICON_TERMINAL, "Open terminal")).clicked() {
@@ -353,11 +365,11 @@ fn connection_menu(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile) {
                 }
             }
         }
-        if let Some(SessionHandle::Containers(_)) = &session {
-            if ui.button(ico(ICON_DEPLOYED_CODE, "Containers")).clicked() {
-                cx.cmd(Cmd::OpenDocker { conn: id, section: Section::Containers });
-                ui.close();
-            }
+        if let Some(SessionHandle::Containers(_)) = &session
+            && ui.button(ico(ICON_DEPLOYED_CODE, "Containers")).clicked()
+        {
+            cx.cmd(Cmd::OpenDocker { conn: id, section: Section::Containers });
+            ui.close();
         }
         if ui.button(ico(ICON_REFRESH, "Refresh")).clicked() {
             cx.cmd(Cmd::RefreshTree(id));
@@ -396,18 +408,21 @@ fn connection_menu(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile) {
 
 fn kv_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, indent: f32) {
     let t = theme::tokens(ui);
-    if !cx.sidebar.kv_dbs.contains_key(&id) {
-        if let Some(s) = cx.conns.session(id).and_then(|h| h.kv()).cloned() {
-            cx.sidebar.kv_dbs.insert(id, KvChildren::Loading(cx.bg.spawn("", async move { s.databases().await })));
-        }
+    if !cx.sidebar.kv_dbs.contains_key(&id)
+        && let Some(s) = cx.conns.session(id).and_then(|h| h.kv()).cloned()
+    {
+        cx.sidebar.kv_dbs.insert(id, KvChildren::Loading(cx.bg.spawn("", async move { s.databases().await })));
     }
-    if let Some(KvChildren::Loading(job)) = cx.sidebar.kv_dbs.get_mut(&id) {
-        if let Some(r) = job.take() {
-            cx.sidebar.kv_dbs.insert(id, match r {
+    if let Some(KvChildren::Loading(job)) = cx.sidebar.kv_dbs.get_mut(&id)
+        && let Some(r) = job.take()
+    {
+        cx.sidebar.kv_dbs.insert(
+            id,
+            match r {
                 Ok(v) => KvChildren::Ready(v),
                 Err(e) => KvChildren::Failed(e.message),
-            });
-        }
+            },
+        );
     }
     match cx.sidebar.kv_dbs.get(&id) {
         Some(KvChildren::Ready(dbs)) => {
@@ -544,11 +559,9 @@ fn object_menu(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, n: &TreeNode) {
             ui.close();
         }
     }
-    if !matches!(n.kind, ObjectKind::Folder(_) | ObjectKind::Column) {
-        if ui.button(ico(ICON_DATA_OBJECT, "Structure & DDL")).clicked() {
-            cx.cmd(Cmd::OpenObject { conn: id, kind: n.kind, path: n.path.clone() });
-            ui.close();
-        }
+    if !matches!(n.kind, ObjectKind::Folder(_) | ObjectKind::Column) && ui.button(ico(ICON_DATA_OBJECT, "Structure & DDL")).clicked() {
+        cx.cmd(Cmd::OpenObject { conn: id, kind: n.kind, path: n.path.clone() });
+        ui.close();
     }
     if ui.button(ico(ICON_CONTENT_COPY, "Copy name")).clicked() {
         ui.ctx().copy_text(if n.kind.has_rows() { qualified.clone() } else { n.label.clone() });
@@ -572,9 +585,16 @@ fn object_menu(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, n: &TreeNode) {
                     if online {
                         crate::views::dialogs::track(cx, format!("ALTER DATABASE {db} SET ONLINE"), "Database is online", Some(id), async move { s.set_database_online(&db, true).await });
                     } else {
-                        cx.confirm(Some(id), format!("Take {db} offline?"), "Open transactions are rolled back and every session is disconnected. Nobody can use the database until it is brought online.", "Take offline", Some(db.clone()), move |cx| {
-                            crate::views::dialogs::track(cx, format!("ALTER DATABASE {db} SET OFFLINE"), "Database is offline", Some(id), async move { s.set_database_online(&db, false).await });
-                        });
+                        cx.confirm(
+                            Some(id),
+                            format!("Take {db} offline?"),
+                            "Open transactions are rolled back and every session is disconnected. Nobody can use the database until it is brought online.",
+                            "Take offline",
+                            Some(db.clone()),
+                            move |cx| {
+                                crate::views::dialogs::track(cx, format!("ALTER DATABASE {db} SET OFFLINE"), "Database is offline", Some(id), async move { s.set_database_online(&db, false).await });
+                            },
+                        );
                     }
                     ui.close();
                 }
@@ -601,7 +621,9 @@ fn object_menu(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, n: &TreeNode) {
                         if ui.button(label).clicked() {
                             let db = n.label.clone();
                             let s = s.clone();
-                            crate::views::dialogs::track(cx, format!("ALTER DATABASE {db}"), if allow { "New connections allowed" } else { "New connections blocked" }, Some(id), async move { s.set_database_allow_connections(&db, allow).await });
+                            crate::views::dialogs::track(cx, format!("ALTER DATABASE {db}"), if allow { "New connections allowed" } else { "New connections blocked" }, Some(id), async move {
+                                s.set_database_allow_connections(&db, allow).await
+                            });
                             ui.close();
                         }
                     }
@@ -624,11 +646,11 @@ fn object_menu(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, n: &TreeNode) {
             }
         }
         ObjectKind::Folder(f) => {
-            if let Some(tpl) = template(d, f, &n.path) {
-                if ui.button(ico(ICON_ADD, &format!("New {}…", f.label().trim_end_matches('s').to_lowercase()))).clicked() {
-                    cx.cmd(Cmd::NewSql { conn: id, database: n.path.database.clone(), text: tpl });
-                    ui.close();
-                }
+            if let Some(tpl) = template(d, f, &n.path)
+                && ui.button(ico(ICON_ADD, &format!("New {}…", f.label().trim_end_matches('s').to_lowercase()))).clicked()
+            {
+                cx.cmd(Cmd::NewSql { conn: id, database: n.path.database.clone(), text: tpl });
+                ui.close();
             }
         }
         _ => {}
@@ -665,11 +687,7 @@ fn object_menu(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, n: &TreeNode) {
             let path = n.path.clone();
             let label = n.label.clone();
             let cascade_ok = d == openvclient_core::sqltext::Dialect::Postgres;
-            let body = if cascade_ok {
-                "Dependent objects block the drop (no CASCADE). This cannot be undone."
-            } else {
-                "This cannot be undone."
-            };
+            let body = if cascade_ok { "Dependent objects block the drop (no CASCADE). This cannot be undone." } else { "This cannot be undone." };
             cx.confirm(Some(id), format!("Drop {} {label}?", kind.label().to_lowercase()), body, "Drop", Some(label.clone()), move |cx| {
                 crate::views::dialogs::track(cx, format!("DROP {label}"), "Dropped", Some(id), async move { s.drop_object(kind, &path, false).await });
             });
@@ -683,28 +701,25 @@ fn template(d: openvclient_core::sqltext::Dialect, f: FolderKind, p: &ObjPath) -
     use openvclient_core::sqltext::Dialect::*;
     let q = |name: &str| d.qualified(if d == MySql { p.database.as_deref() } else { p.schema.as_deref() }, name);
     Some(match (d, f) {
-        (Postgres, FolderKind::Tables) => format!(
-            "CREATE TABLE {} (\n    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n    name text NOT NULL,\n    created_at timestamptz NOT NULL DEFAULT now()\n);\n",
-            q("new_table")
-        ),
+        (Postgres, FolderKind::Tables) => {
+            format!("CREATE TABLE {} (\n    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n    name text NOT NULL,\n    created_at timestamptz NOT NULL DEFAULT now()\n);\n", q("new_table"))
+        }
         (MySql, FolderKind::Tables) => format!(
             "CREATE TABLE {} (\n    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\n    name VARCHAR(255) NOT NULL,\n    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n",
             q("new_table")
         ),
-        (Sqlite, FolderKind::Tables) => format!("CREATE TABLE {} (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    created_at TEXT NOT NULL DEFAULT (datetime('now'))\n) STRICT;\n", q("new_table")),
+        (Sqlite, FolderKind::Tables) => {
+            format!("CREATE TABLE {} (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    created_at TEXT NOT NULL DEFAULT (datetime('now'))\n) STRICT;\n", q("new_table"))
+        }
         (_, FolderKind::Views) => format!("CREATE VIEW {} AS\nSELECT 1 AS example;\n", q("new_view")),
         (Postgres, FolderKind::MaterializedViews) => format!("CREATE MATERIALIZED VIEW {} AS\nSELECT 1 AS example\nWITH DATA;\n", q("new_view")),
-        (Postgres, FolderKind::Functions) => format!(
-            "CREATE OR REPLACE FUNCTION {}(a integer, b integer)\nRETURNS integer\nLANGUAGE sql\nIMMUTABLE\nAS $$\n    SELECT a + b\n$$;\n",
-            q("new_function")
-        ),
+        (Postgres, FolderKind::Functions) => {
+            format!("CREATE OR REPLACE FUNCTION {}(a integer, b integer)\nRETURNS integer\nLANGUAGE sql\nIMMUTABLE\nAS $$\n    SELECT a + b\n$$;\n", q("new_function"))
+        }
         (Postgres, FolderKind::Procedures) => format!("CREATE OR REPLACE PROCEDURE {}()\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    -- body\nEND;\n$$;\n", q("new_procedure")),
         (Postgres, FolderKind::Sequences) => format!("CREATE SEQUENCE {} START 1;\n", q("new_sequence")),
         (MySql, FolderKind::Procedures) => format!("DELIMITER //\nCREATE PROCEDURE {}()\nBEGIN\n    SELECT 1;\nEND //\nDELIMITER ;\n", q("new_procedure")),
-        (MySql, FolderKind::Functions) => format!(
-            "DELIMITER //\nCREATE FUNCTION {}(a INT, b INT) RETURNS INT DETERMINISTIC\nBEGIN\n    RETURN a + b;\nEND //\nDELIMITER ;\n",
-            q("new_function")
-        ),
+        (MySql, FolderKind::Functions) => format!("DELIMITER //\nCREATE FUNCTION {}(a INT, b INT) RETURNS INT DETERMINISTIC\nBEGIN\n    RETURN a + b;\nEND //\nDELIMITER ;\n", q("new_function")),
         (MySql, FolderKind::Events) => format!("CREATE EVENT {}\nON SCHEDULE EVERY 1 DAY\nDO\n    DELETE FROM some_table WHERE created_at < NOW() - INTERVAL 30 DAY;\n", q("new_event")),
         (Sqlite, FolderKind::Triggers) => "CREATE TRIGGER new_trigger AFTER INSERT ON some_table\nBEGIN\n    SELECT 1;\nEND;\n".to_string(),
         (MySql, FolderKind::Triggers) => format!("CREATE TRIGGER {}\nBEFORE INSERT ON some_table\nFOR EACH ROW\nSET NEW.created_at = NOW();\n", q("new_trigger")),
@@ -722,14 +737,14 @@ fn resource_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, parent: Optio
         let p = parent.clone();
         cx.sidebar.res.insert(key.clone(), ResChildren::Loading(cx.bg.spawn("", async move { s.children(p.as_deref()).await })));
     }
-    if let Some(ResChildren::Loading(job)) = cx.sidebar.res.get_mut(&key) {
-        if let Some(r) = job.take() {
-            let v = match r {
-                Ok(v) => ResChildren::Ready(v),
-                Err(e) => ResChildren::Failed(e.message),
-            };
-            cx.sidebar.res.insert(key.clone(), v);
-        }
+    if let Some(ResChildren::Loading(job)) = cx.sidebar.res.get_mut(&key)
+        && let Some(r) = job.take()
+    {
+        let v = match r {
+            Ok(v) => ResChildren::Ready(v),
+            Err(e) => ResChildren::Failed(e.message),
+        };
+        cx.sidebar.res.insert(key.clone(), v);
     }
     let nodes: Vec<Node> = match cx.sidebar.res.get(&key) {
         Some(ResChildren::Ready(v)) => v.clone(),

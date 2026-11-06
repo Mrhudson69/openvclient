@@ -28,7 +28,10 @@ pub enum KvValue {
     /// Stream entries: (id, fields)
     Stream(Vec<(String, Vec<(String, String)>)>),
     /// Types we can show but not edit (modules, JSON…): rendered by the server.
-    Other { type_name: String, rendered: String },
+    Other {
+        type_name: String,
+        rendered: String,
+    },
 }
 
 #[derive(Clone, Debug)]

@@ -7,10 +7,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use openvclient_core::kv::*;
-use openvclient_core::{
-    Category, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ServerInfo, ServiceSession,
-    SessionHandle,
-};
+use openvclient_core::{Category, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ServerInfo, ServiceSession, SessionHandle};
 use redis::aio::ConnectionManager;
 use redis::{Cmd, Value as R};
 use tokio::sync::Mutex;
@@ -53,9 +50,7 @@ fn r_err(e: redis::RedisError) -> Error {
 }
 
 fn enc(s: &str) -> String {
-    s.bytes()
-        .map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
-        .collect()
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 #[derive(Clone)]
@@ -102,12 +97,7 @@ impl Driver for RedisDriver {
         *s.info.lock().await = ServerInfo {
             product,
             version: g("redis_version"),
-            details: vec![
-                ("Mode".into(), g("redis_mode")),
-                ("Role".into(), g("role")),
-                ("OS".into(), g("os")),
-                ("Memory used".into(), g("used_memory_human")),
-            ],
+            details: vec![("Mode".into(), g("redis_mode")), ("Role".into(), g("role")), ("OS".into(), g("os")), ("Memory used".into(), g("used_memory_human"))],
         };
         Ok(SessionHandle::KeyValue(Arc::new(s)))
     }
@@ -129,11 +119,56 @@ struct RedisSession {
 fn is_read_command(name: &str) -> bool {
     matches!(
         name.to_ascii_uppercase().as_str(),
-        "GET" | "MGET" | "GETRANGE" | "STRLEN" | "EXISTS" | "TYPE" | "TTL" | "PTTL" | "KEYS" | "SCAN" | "HGET" | "HGETALL"
-            | "HMGET" | "HKEYS" | "HVALS" | "HLEN" | "HSCAN" | "HEXISTS" | "LRANGE" | "LLEN" | "LINDEX" | "SMEMBERS"
-            | "SCARD" | "SISMEMBER" | "SSCAN" | "ZRANGE" | "ZCARD" | "ZSCORE" | "ZRANK" | "ZSCAN" | "ZRANGEBYSCORE"
-            | "XRANGE" | "XREVRANGE" | "XLEN" | "XINFO" | "INFO" | "PING" | "DBSIZE" | "MEMORY" | "OBJECT" | "CLIENT"
-            | "SLOWLOG" | "CONFIG" | "TIME" | "ECHO" | "DUMP" | "RANDOMKEY" | "COMMAND" | "LATENCY" | "SCRIPT"
+        "GET"
+            | "MGET"
+            | "GETRANGE"
+            | "STRLEN"
+            | "EXISTS"
+            | "TYPE"
+            | "TTL"
+            | "PTTL"
+            | "KEYS"
+            | "SCAN"
+            | "HGET"
+            | "HGETALL"
+            | "HMGET"
+            | "HKEYS"
+            | "HVALS"
+            | "HLEN"
+            | "HSCAN"
+            | "HEXISTS"
+            | "LRANGE"
+            | "LLEN"
+            | "LINDEX"
+            | "SMEMBERS"
+            | "SCARD"
+            | "SISMEMBER"
+            | "SSCAN"
+            | "ZRANGE"
+            | "ZCARD"
+            | "ZSCORE"
+            | "ZRANK"
+            | "ZSCAN"
+            | "ZRANGEBYSCORE"
+            | "XRANGE"
+            | "XREVRANGE"
+            | "XLEN"
+            | "XINFO"
+            | "INFO"
+            | "PING"
+            | "DBSIZE"
+            | "MEMORY"
+            | "OBJECT"
+            | "CLIENT"
+            | "SLOWLOG"
+            | "CONFIG"
+            | "TIME"
+            | "ECHO"
+            | "DUMP"
+            | "RANDOMKEY"
+            | "COMMAND"
+            | "LATENCY"
+            | "SCRIPT"
     )
 }
 
@@ -143,9 +178,7 @@ impl RedisSession {
             return Ok(c.clone());
         }
         let client = redis::Client::open(self.target.url(db)).map_err(r_err)?;
-        let cfg = redis::aio::ConnectionManagerConfig::new()
-            .set_connection_timeout(Some(Duration::from_secs(10)))
-            .set_response_timeout(Some(Duration::from_secs(60)));
+        let cfg = redis::aio::ConnectionManagerConfig::new().set_connection_timeout(Some(Duration::from_secs(10))).set_response_timeout(Some(Duration::from_secs(60)));
         let mgr = tokio::time::timeout(Duration::from_secs(12), client.get_connection_manager_with_config(cfg))
             .await
             .map_err(|_| Error::connection(format!("Timed out connecting to {}:{}", self.target.host, self.target.port)))?
@@ -212,12 +245,7 @@ pub fn render(v: &R, indent: usize) -> String {
             if items.is_empty() {
                 return "(empty array)".into();
             }
-            items
-                .iter()
-                .enumerate()
-                .map(|(i, x)| format!("{}{}) {}", if i == 0 { String::new() } else { pad.clone() }, i + 1, render(x, indent + 3)))
-                .collect::<Vec<_>>()
-                .join("\n")
+            items.iter().enumerate().map(|(i, x)| format!("{}{}) {}", if i == 0 { String::new() } else { pad.clone() }, i + 1, render(x, indent + 3))).collect::<Vec<_>>().join("\n")
         }
         R::Map(pairs) => {
             if pairs.is_empty() {
@@ -502,10 +530,7 @@ impl KeyValueSession for RedisSession {
 
     async fn clients(&self) -> Result<Vec<Vec<(String, String)>>> {
         let text: String = self.q(self.default_db, redis::cmd("CLIENT").arg("LIST")).await?;
-        Ok(text
-            .lines()
-            .map(|l| l.split(' ').filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_string(), v.to_string())).collect())
-            .collect())
+        Ok(text.lines().map(|l| l.split(' ').filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_string(), v.to_string())).collect()).collect())
     }
 
     async fn kill_client(&self, id: &str) -> Result<()> {

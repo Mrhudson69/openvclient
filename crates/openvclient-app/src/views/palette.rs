@@ -102,7 +102,7 @@ fn entries(cx: &AppCtx, tabs: &[(u64, String)], q: &str) -> Vec<Entry> {
     if let Some(c) = cx.selected_conn.filter(|c| cx.conns.is_connected(*c)) {
         add(ICON_MONITORING, format!("Monitor {}", cx.profile_name(c)), "command".into(), Action::Cmd(Cmd::OpenMonitor(c)));
     }
-    v.sort_by(|a, b| b.score.cmp(&a.score));
+    v.sort_by_key(|x| std::cmp::Reverse(x.score));
     v.truncate(60);
     v
 }
@@ -132,12 +132,8 @@ pub fn show(ctx: &egui::Context, cx: &mut AppCtx, tabs: &[(u64, String)]) {
     let resp = egui::Modal::new(egui::Id::unique("palette")).show(ctx, |ui| {
         ui.set_width(620.0);
         let t = theme::tokens(ui);
-        let r = ui.add(
-            egui::TextEdit::singleline(&mut cx.palette.query)
-                .hint_text("Search connections, tables, open tabs, commands…")
-                .font(egui::FontId::proportional(16.0))
-                .desired_width(f32::INFINITY),
-        );
+        let r =
+            ui.add(egui::TextEdit::singleline(&mut cx.palette.query).hint_text("Search connections, tables, open tabs, commands…").font(egui::FontId::proportional(16.0)).desired_width(f32::INFINITY));
         if cx.palette.focus {
             r.request_focus();
             cx.palette.focus = false;
@@ -168,8 +164,11 @@ pub fn show(ctx: &egui::Context, cx: &mut AppCtx, tabs: &[(u64, String)]) {
                 p.text(egui::pos2(rect.left() + 18.0, cy), egui::Align2::CENTER_CENTER, String::from(e.icon), egui::FontId::proportional(theme::icon::MD), t.muted_fg);
                 let label = p.layout_no_wrap(e.label.clone(), egui::FontId::proportional(14.0), t.fg);
                 let lw = label.size().x.min(rect.width() * 0.55);
-                p.with_clip_rect(egui::Rect::from_min_max(egui::pos2(rect.left() + 34.0, rect.top()), egui::pos2(rect.left() + 34.0 + lw, rect.bottom())))
-                    .galley(egui::pos2(rect.left() + 34.0, cy - label.size().y / 2.0), label, t.fg);
+                p.with_clip_rect(egui::Rect::from_min_max(egui::pos2(rect.left() + 34.0, rect.top()), egui::pos2(rect.left() + 34.0 + lw, rect.bottom()))).galley(
+                    egui::pos2(rect.left() + 34.0, cy - label.size().y / 2.0),
+                    label,
+                    t.fg,
+                );
                 let dx = rect.left() + 34.0 + lw + 12.0;
                 let detail_clip = egui::Rect::from_min_max(egui::pos2(dx, rect.top()), egui::pos2(rect.right() - 8.0, rect.bottom()));
                 p.with_clip_rect(detail_clip).text(egui::pos2(dx, cy), egui::Align2::LEFT_CENTER, &e.detail, egui::FontId::proportional(12.0), t.muted_fg);

@@ -184,11 +184,7 @@ pub async fn grant(s: &PgSession, spec: GrantSpec, revoke: bool) -> Result<()> {
         GrantTarget::Table(p) => (format!("TABLE {}", D.qualified(p.schema.as_deref(), p.name()?)), p.database.clone()),
     };
     let who = D.quote_ident(&spec.principal);
-    let sql = if revoke {
-        format!("REVOKE {privs} ON {on} FROM {who}")
-    } else {
-        format!("GRANT {privs} ON {on} TO {who}{}", if spec.with_grant_option { " WITH GRANT OPTION" } else { "" })
-    };
+    let sql = if revoke { format!("REVOKE {privs} ON {on} FROM {who}") } else { format!("GRANT {privs} ON {on} TO {who}{}", if spec.with_grant_option { " WITH GRANT OPTION" } else { "" }) };
     s.run(db.as_deref(), &sql).await.map(|_| ())
 }
 
@@ -220,9 +216,7 @@ pub async fn drop_object(s: &PgSession, kind: ObjectKind, path: &ObjPath, cascad
         ObjectKind::Database => {
             let name = path.database.clone().ok_or_else(|| Error::invalid("Database name missing"))?;
             if name == s.target.database {
-                return Err(Error::invalid(
-                    "This is the connection's default database. Connect to another database (edit the connection) to drop it.",
-                ));
+                return Err(Error::invalid("This is the connection's default database. Connect to another database (edit the connection) to drop it."));
             }
             s.drop_pool(&name);
             let force = if cascade && s.version_num() >= 130000 { " WITH (FORCE)" } else { "" };
@@ -230,28 +224,13 @@ pub async fn drop_object(s: &PgSession, kind: ObjectKind, path: &ObjPath, cascad
             return s.run(None, &sql).await.map(|_| ());
         }
         ObjectKind::Schema => format!("DROP SCHEMA {}{tail}", D.quote_ident(schema.unwrap_or_default())),
-        ObjectKind::Function | ObjectKind::Procedure => format!(
-            "DROP {} {}({}){tail}",
-            kind.sql_keyword().unwrap_or_default(),
-            D.qualified(schema, path.name()?),
-            path.sub.clone().unwrap_or_default()
-        ),
+        ObjectKind::Function | ObjectKind::Procedure => {
+            format!("DROP {} {}({}){tail}", kind.sql_keyword().unwrap_or_default(), D.qualified(schema, path.name()?), path.sub.clone().unwrap_or_default())
+        }
         ObjectKind::Index => format!("DROP INDEX {}{tail}", D.qualified(schema, path.sub.as_deref().unwrap_or_default())),
-        ObjectKind::Trigger => format!(
-            "DROP TRIGGER {} ON {}{tail}",
-            D.quote_ident(path.sub.as_deref().unwrap_or_default()),
-            D.qualified(schema, path.name()?)
-        ),
-        ObjectKind::Constraint => format!(
-            "ALTER TABLE {} DROP CONSTRAINT {}{tail}",
-            D.qualified(schema, path.name()?),
-            D.quote_ident(path.sub.as_deref().unwrap_or_default())
-        ),
-        ObjectKind::Column => format!(
-            "ALTER TABLE {} DROP COLUMN {}{tail}",
-            D.qualified(schema, path.name()?),
-            D.quote_ident(path.sub.as_deref().unwrap_or_default())
-        ),
+        ObjectKind::Trigger => format!("DROP TRIGGER {} ON {}{tail}", D.quote_ident(path.sub.as_deref().unwrap_or_default()), D.qualified(schema, path.name()?)),
+        ObjectKind::Constraint => format!("ALTER TABLE {} DROP CONSTRAINT {}{tail}", D.qualified(schema, path.name()?), D.quote_ident(path.sub.as_deref().unwrap_or_default())),
+        ObjectKind::Column => format!("ALTER TABLE {} DROP COLUMN {}{tail}", D.qualified(schema, path.name()?), D.quote_ident(path.sub.as_deref().unwrap_or_default())),
         k => match k.sql_keyword() {
             Some(kw) => format!("DROP {kw} {}{tail}", D.qualified(schema, path.name()?)),
             None => return Err(Error::unsupported(format!("Cannot drop a {}", k.label()))),
@@ -324,13 +303,7 @@ pub async fn backup(s: &PgSession, req: BackupRequest) -> Result<String> {
     let t = Instant::now();
     let warnings = run_tool(cmd, "pg_dump").await?;
     let size = std::fs::metadata(&req.path).map(|m| m.len()).unwrap_or(0);
-    let mut msg = format!(
-        "pg_dump wrote {} ({} format, {} bytes) in {}",
-        req.path.display(),
-        if plain { "plain SQL" } else { "custom" },
-        size,
-        openvclient_core::elapsed_ms(t.elapsed())
-    );
+    let mut msg = format!("pg_dump wrote {} ({} format, {} bytes) in {}", req.path.display(), if plain { "plain SQL" } else { "custom" }, size, openvclient_core::elapsed_ms(t.elapsed()));
     if !warnings.is_empty() {
         msg.push_str(&format!("\n{warnings}"));
     }
@@ -340,10 +313,7 @@ pub async fn backup(s: &PgSession, req: BackupRequest) -> Result<String> {
 pub async fn restore(s: &PgSession, req: BackupRequest) -> Result<String> {
     let db = req.database.clone().unwrap_or_else(|| s.target.database.clone());
     let mut head = [0u8; 5];
-    let is_custom = std::fs::File::open(&req.path)
-        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head))
-        .map(|_| &head == b"PGDMP")
-        .unwrap_or(false);
+    let is_custom = std::fs::File::open(&req.path).and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head)).map(|_| &head == b"PGDMP").unwrap_or(false);
     let t = Instant::now();
     let (warnings, tool) = if is_custom {
         let mut cmd = tool_command(s, "pg_restore")?;

@@ -156,8 +156,20 @@ impl PlanView {
                     _ => None,
                 };
                 let hot = share.unwrap_or(0.0);
-                let accent = if hot >= 50.0 { t.destructive } else if hot >= 20.0 { t.warning } else { t.accent };
-                let fill = if is_sel { t.selection } else if resp.hovered() { t.muted } else { t.card };
+                let accent = if hot >= 50.0 {
+                    t.destructive
+                } else if hot >= 20.0 {
+                    t.warning
+                } else {
+                    t.accent
+                };
+                let fill = if is_sel {
+                    t.selection
+                } else if resp.hovered() {
+                    t.muted
+                } else {
+                    t.card
+                };
                 painter.rect(rect, 8.0, fill, Stroke::new(if is_sel { 2.0 } else { 1.0 }, if is_sel { t.ring } else { t.border }), egui::StrokeKind::Inside);
                 // Cost heat strip on the left edge.
                 painter.rect_filled(Rect::from_min_size(rect.min, vec2(4.0, rect.height())), egui::CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, accent);
@@ -183,12 +195,12 @@ impl PlanView {
                 }
                 let lc = if hot >= 20.0 { accent } else { t.muted_fg };
                 painter.with_clip_rect(rect.shrink(4.0)).text(pos2(rect.left() + 12.0, rect.bottom() - 14.0), Align2::LEFT_CENTER, line.join(" · "), FontId::proportional(11.5), lc);
-                if max_ms > 0.0 {
-                    if let Some(ms) = p.node.actual_ms {
-                        let frac = (ms / max_ms) as f32;
-                        let bar = Rect::from_min_size(pos2(rect.left() + 12.0, rect.bottom() - 5.0), vec2((rect.width() - 24.0) * frac.clamp(0.02, 1.0), 2.0));
-                        painter.rect_filled(bar, 1.0, accent);
-                    }
+                if max_ms > 0.0
+                    && let Some(ms) = p.node.actual_ms
+                {
+                    let frac = (ms / max_ms) as f32;
+                    let bar = Rect::from_min_size(pos2(rect.left() + 12.0, rect.bottom() - 5.0), vec2((rect.width() - 24.0) * frac.clamp(0.02, 1.0), 2.0));
+                    painter.rect_filled(bar, 1.0, accent);
                 }
                 if resp.clicked() {
                     self.selected = if is_sel { None } else { Some(p.path.clone()) };

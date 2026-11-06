@@ -11,10 +11,7 @@ use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::query_parameters::*;
 use futures::StreamExt;
 use openvclient_core::containers::*;
-use openvclient_core::{
-    Category, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ServerInfo, ServiceSession,
-    SessionHandle,
-};
+use openvclient_core::{Category, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ServerInfo, ServiceSession, SessionHandle};
 
 pub struct DockerDriver {
     info: DriverInfo,
@@ -44,7 +41,11 @@ fn d_err(e: bollard::errors::Error) -> Error {
     use bollard::errors::Error as E;
     match e {
         E::DockerResponseServerError { status_code, message } => {
-            if status_code == 404 { Error::invalid(message) } else { Error::server(format!("{message} (HTTP {status_code})")) }
+            if status_code == 404 {
+                Error::invalid(message)
+            } else {
+                Error::server(format!("{message} (HTTP {status_code})"))
+            }
         }
         other => {
             let m = other.to_string();
@@ -78,9 +79,7 @@ impl Driver for DockerDriver {
     async fn connect(&self, p: ConnectParams) -> Result<SessionHandle> {
         let timeout: u64 = p.get_or("timeout", "120").parse().unwrap_or(120);
         let docker = match p.get("endpoint") {
-            Some(ep) if ep.starts_with("tcp://") || ep.starts_with("http://") => {
-                Docker::connect_with_http(ep, timeout, bollard::API_DEFAULT_VERSION).map_err(d_err)?
-            }
+            Some(ep) if ep.starts_with("tcp://") || ep.starts_with("http://") => Docker::connect_with_http(ep, timeout, bollard::API_DEFAULT_VERSION).map_err(d_err)?,
             Some(ep) => Docker::connect_with_socket(ep, timeout, bollard::API_DEFAULT_VERSION).map_err(d_err)?,
             None if std::env::var("DOCKER_HOST").is_ok() => Docker::connect_with_defaults().map_err(d_err)?,
             None => {
@@ -95,10 +94,7 @@ impl Driver for DockerDriver {
         let info = ServerInfo {
             product: format!("Docker Engine {}", v.version.clone().unwrap_or_default()),
             version: v.version.clone().unwrap_or_default(),
-            details: vec![
-                ("API".into(), v.api_version.unwrap_or_default()),
-                ("OS/Arch".into(), format!("{}/{}", v.os.unwrap_or_default(), v.arch.unwrap_or_default())),
-            ],
+            details: vec![("API".into(), v.api_version.unwrap_or_default()), ("OS/Arch".into(), format!("{}/{}", v.os.unwrap_or_default(), v.arch.unwrap_or_default()))],
         };
         Ok(SessionHandle::Containers(Arc::new(DockerSession { docker, info, read_only: p.read_only })))
     }
@@ -118,9 +114,7 @@ impl DockerSession {
 
 fn log_text(chunk: LogOutput) -> String {
     match chunk {
-        LogOutput::StdErr { message } | LogOutput::StdOut { message } | LogOutput::Console { message } | LogOutput::StdIn { message } => {
-            String::from_utf8_lossy(&message).into_owned()
-        }
+        LogOutput::StdErr { message } | LogOutput::StdOut { message } | LogOutput::Console { message } | LogOutput::StdIn { message } => String::from_utf8_lossy(&message).into_owned(),
     }
 }
 
@@ -169,7 +163,7 @@ impl ContainerSession for DockerSession {
                 }
             })
             .collect();
-        out.sort_by(|a, b| (a.compose_project.clone(), a.name.clone()).cmp(&(b.compose_project.clone(), b.name.clone())));
+        out.sort_by_key(|a| (a.compose_project.clone(), a.name.clone()));
         Ok(out)
     }
 
@@ -183,9 +177,7 @@ impl ContainerSession for DockerSession {
             ContainerAction::Pause => d.pause_container(id).await,
             ContainerAction::Unpause => d.unpause_container(id).await,
             ContainerAction::Kill => d.kill_container(id, None::<KillContainerOptions>).await,
-            ContainerAction::Remove { force } => {
-                d.remove_container(id, Some(RemoveContainerOptionsBuilder::default().force(force).build())).await
-            }
+            ContainerAction::Remove { force } => d.remove_container(id, Some(RemoveContainerOptionsBuilder::default().force(force).build())).await,
         }
         .map_err(d_err)
     }
@@ -219,11 +211,7 @@ impl ContainerSession for DockerSession {
         let mem = st.memory_stats.as_ref();
         // Match `docker stats`: exclude reclaimable page cache.
         let cache = mem.and_then(|m| m.stats.as_ref()).and_then(|s| s.get("inactive_file").or(s.get("cache")).copied()).unwrap_or(0);
-        let (rx, tx) = st
-            .networks
-            .as_ref()
-            .map(|n| n.values().fold((0, 0), |(r, t), v| (r + v.rx_bytes.unwrap_or(0), t + v.tx_bytes.unwrap_or(0))))
-            .unwrap_or((0, 0));
+        let (rx, tx) = st.networks.as_ref().map(|n| n.values().fold((0, 0), |(r, t), v| (r + v.rx_bytes.unwrap_or(0), t + v.tx_bytes.unwrap_or(0)))).unwrap_or((0, 0));
         let (br, bw) = st
             .blkio_stats
             .as_ref()
@@ -253,11 +241,7 @@ impl ContainerSession for DockerSession {
         if cmd.is_empty() {
             return Err(Error::invalid("Enter a command"));
         }
-        let exec = self
-            .docker
-            .create_exec(id, CreateExecOptions { attach_stdout: Some(true), attach_stderr: Some(true), cmd: Some(cmd), ..Default::default() })
-            .await
-            .map_err(d_err)?;
+        let exec = self.docker.create_exec(id, CreateExecOptions { attach_stdout: Some(true), attach_stderr: Some(true), cmd: Some(cmd), ..Default::default() }).await.map_err(d_err)?;
         let mut out = String::new();
         if let StartExecResults::Attached { mut output, .. } = self.docker.start_exec(&exec.id, None).await.map_err(d_err)? {
             while let Some(chunk) = output.next().await {
@@ -274,11 +258,8 @@ impl ContainerSession for DockerSession {
 
     async fn images(&self) -> Result<Vec<ImageInfo>> {
         let list = self.docker.list_images(Some(ListImagesOptionsBuilder::default().all(false).build())).await.map_err(d_err)?;
-        let mut v: Vec<ImageInfo> = list
-            .into_iter()
-            .map(|i| ImageInfo { id: i.id, tags: i.repo_tags, size: i.size, created: i.created, containers: i.containers })
-            .collect();
-        v.sort_by(|a, b| b.created.cmp(&a.created));
+        let mut v: Vec<ImageInfo> = list.into_iter().map(|i| ImageInfo { id: i.id, tags: i.repo_tags, size: i.size, created: i.created, containers: i.containers }).collect();
+        v.sort_by_key(|x| std::cmp::Reverse(x.created));
         Ok(v)
     }
 
@@ -308,12 +289,8 @@ impl ContainerSession for DockerSession {
 
     async fn volumes(&self) -> Result<Vec<VolumeInfo>> {
         let r = self.docker.list_volumes(None::<ListVolumesOptions>).await.map_err(d_err)?;
-        let mut v: Vec<VolumeInfo> = r
-            .volumes
-            .unwrap_or_default()
-            .into_iter()
-            .map(|v| VolumeInfo { name: v.name, driver: v.driver, mountpoint: v.mountpoint, created: v.created_at.map(|d| d.to_string()) })
-            .collect();
+        let mut v: Vec<VolumeInfo> =
+            r.volumes.unwrap_or_default().into_iter().map(|v| VolumeInfo { name: v.name, driver: v.driver, mountpoint: v.mountpoint, created: v.created_at.map(|d| d.to_string()) }).collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)
     }
@@ -327,12 +304,7 @@ impl ContainerSession for DockerSession {
         let list = self.docker.list_networks(None::<ListNetworksOptions>).await.map_err(d_err)?;
         let mut v: Vec<NetworkInfo> = list
             .into_iter()
-            .map(|n| NetworkInfo {
-                id: n.id.unwrap_or_default(),
-                name: n.name.unwrap_or_default(),
-                driver: n.driver.unwrap_or_default(),
-                scope: n.scope.unwrap_or_default(),
-            })
+            .map(|n| NetworkInfo { id: n.id.unwrap_or_default(), name: n.name.unwrap_or_default(), driver: n.driver.unwrap_or_default(), scope: n.scope.unwrap_or_default() })
             .collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)

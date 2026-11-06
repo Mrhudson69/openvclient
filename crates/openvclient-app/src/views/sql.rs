@@ -190,13 +190,13 @@ impl SqlTab {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx, tab_id: u64) {
         let t = theme::tokens(ui);
         // Background progress.
-        if let Console::Opening(job) = &mut self.console {
-            if let Some(r) = job.take() {
-                self.console = match r {
-                    Ok(c) => Console::Ready(c),
-                    Err(e) => Console::Failed(e),
-                };
-            }
+        if let Console::Opening(job) = &mut self.console
+            && let Some(r) = job.take()
+        {
+            self.console = match r {
+                Ok(c) => Console::Ready(c),
+                Err(e) => Console::Failed(e),
+            };
         }
         if let Some(res) = poll(&mut self.run) {
             for r in &res {
@@ -246,10 +246,10 @@ impl SqlTab {
         // Toolbar.
         ui.horizontal(|ui| {
             if running {
-                if theme::danger_button(ui, ico(ICON_STOP, &theme::kbd("Cancel  ⌘."))).clicked() {
-                    if let Some(c) = self.console() {
-                        c.cancel();
-                    }
+                if theme::danger_button(ui, ico(ICON_STOP, &theme::kbd("Cancel  ⌘."))).clicked()
+                    && let Some(c) = self.console()
+                {
+                    c.cancel();
                 }
                 ui.add(egui::Spinner::new());
                 if let Some(j) = &self.run {
@@ -270,24 +270,21 @@ impl SqlTab {
                 want = Some((false, true));
             }
             if caps.explain_analyze
-                && ui
-                    .add_enabled(!running, egui::Button::new(ico(ICON_SPEED, "Analyze")))
-                    .on_hover_text("EXPLAIN ANALYZE: executes the statement; data changes are rolled back")
-                    .clicked()
+                && ui.add_enabled(!running, egui::Button::new(ico(ICON_SPEED, "Analyze"))).on_hover_text("EXPLAIN ANALYZE: executes the statement; data changes are rolled back").clicked()
             {
                 want_analyze = true;
             }
             ui.separator();
-            if ui.button(String::from(ICON_FILE_OPEN)).on_hover_text("Open .sql file").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("SQL", &["sql", "txt"]).pick_file() {
-                    match std::fs::read_to_string(&p) {
-                        Ok(s) => {
-                            self.text = s;
-                            self.file = Some(p);
-                            self.dirty = false;
-                        }
-                        Err(e) => cx.toasts.error_text("Could not open file", e.to_string()),
+            if ui.button(String::from(ICON_FILE_OPEN)).on_hover_text("Open .sql file").clicked()
+                && let Some(p) = rfd::FileDialog::new().add_filter("SQL", &["sql", "txt"]).pick_file()
+            {
+                match std::fs::read_to_string(&p) {
+                    Ok(s) => {
+                        self.text = s;
+                        self.file = Some(p);
+                        self.dirty = false;
                     }
+                    Err(e) => cx.toasts.error_text("Could not open file", e.to_string()),
                 }
             }
             if ui.button(String::from(ICON_SAVE)).on_hover_text(theme::kbd("Save (⌘S)")).clicked() {
@@ -337,11 +334,11 @@ impl SqlTab {
                     out = Some(o);
                 });
             });
-        if let Some(o) = &out {
-            if o.cursor.is_some() {
-                self.last_cursor = o.cursor;
-                self.last_selection = o.selection;
-            }
+        if let Some(o) = &out
+            && o.cursor.is_some()
+        {
+            self.last_cursor = o.cursor;
+            self.last_selection = o.selection;
         }
         // Ranges must still fit the text (it may have been edited since).
         let n = self.text.len();
@@ -350,10 +347,11 @@ impl SqlTab {
         if save {
             self.save(cx, false);
         }
-        if cancel && running {
-            if let Some(c) = self.console() {
-                c.cancel();
-            }
+        if cancel
+            && running
+            && let Some(c) = self.console()
+        {
+            c.cancel();
         }
         if !running {
             if run_one || refresh {
@@ -477,7 +475,10 @@ impl SqlTab {
                         ui.label(RichText::new(r.sql.lines().next().unwrap_or("")).monospace().color(t.muted_fg));
                         crate::views::error_box(ui, e);
                         if self.results.len() > 1 {
-                            ui.label(RichText::new(format!("Stopped at statement {} of {}; later statements did not run.", self.active + 1, self.running_sql.len().max(self.results.len()))).color(t.muted_fg));
+                            ui.label(
+                                RichText::new(format!("Stopped at statement {} of {}; later statements did not run.", self.active + 1, self.running_sql.len().max(self.results.len())))
+                                    .color(t.muted_fg),
+                            );
                         }
                     }
                     Ok(StatementOutcome::Affected(n)) => {
@@ -513,7 +514,18 @@ impl SqlTab {
                                 ui.add(egui::TextEdit::singleline(&mut st.filter).hint_text(ico(ICON_SEARCH, "Filter rows")).desired_width(200.0));
                             });
                         });
-                        events.extend(Grid { id: egui::Id::unique(("grid", tab_id, self.active, self.generation)), rs: &rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: self.generation, row_offset: 0 }.show(ui, st));
+                        events.extend(
+                            Grid {
+                                id: egui::Id::unique(("grid", tab_id, self.active, self.generation)),
+                                rs: &rs,
+                                editable: false,
+                                server_sort: None,
+                                overlay: Overlay::default(),
+                                generation: self.generation,
+                                row_offset: 0,
+                            }
+                            .show(ui, st),
+                        );
                         detail_window(ui.ctx(), egui::Id::unique(("detail", tab_id)), &rs, st);
                         for e in events {
                             if let GridEvent::CopyRows(rows, f) = e {
@@ -588,7 +600,13 @@ fn plan_node(ui: &mut egui::Ui, n: &PlanNode, depth: usize, max_cost: f64, max_m
             };
             let (rect, _) = ui.allocate_exact_size(egui::vec2(60.0, 10.0), egui::Sense::hover());
             ui.painter().rect_filled(rect, 3.0, t.muted);
-            let color = if frac > 0.6 { t.destructive } else if frac > 0.25 { t.warning } else { t.accent };
+            let color = if frac > 0.6 {
+                t.destructive
+            } else if frac > 0.25 {
+                t.warning
+            } else {
+                t.accent
+            };
             ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * frac.clamp(0.02, 1.0), rect.height())), 3.0, color);
             ui.label(RichText::new(&n.title).strong());
             let mut parts = Vec::new();

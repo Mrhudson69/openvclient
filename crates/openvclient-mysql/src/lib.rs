@@ -15,8 +15,7 @@ use openvclient_core::explain::{ExplainResult, mysql_tree_text};
 use openvclient_core::sql::*;
 use openvclient_core::sqltext::{Dialect, leading_keyword};
 use openvclient_core::{
-    Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, ErrorKind, FieldKind, FieldSpec, Result,
-    ResultSet, ServerInfo, ServiceSession, SessionHandle, Value, network_fields,
+    Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, ErrorKind, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value, network_fields,
 };
 use parking_lot::Mutex;
 
@@ -39,16 +38,7 @@ impl Default for MySqlDriver {
                 .advanced(),
         );
         fields.push(FieldSpec::text("connect_timeout", "Connect timeout (s)").kind(FieldKind::Number).default("10").advanced());
-        Self {
-            info: DriverInfo {
-                id: "mysql",
-                name: "MySQL",
-                category: Category::Relational,
-                description: "MySQL 5.7+, Percona, TiDB and wire-compatible servers",
-                badge: "MY",
-                fields,
-            },
-        }
+        Self { info: DriverInfo { id: "mysql", name: "MySQL", category: Category::Relational, description: "MySQL 5.7+, Percona, TiDB and wire-compatible servers", badge: "MY", fields } }
     }
 }
 
@@ -93,9 +83,7 @@ impl MyTarget {
         }
         if self.ssl != "disabled" {
             let verify = self.ssl == "verify";
-            b = b.ssl_opts(Some(
-                SslOpts::default().with_danger_accept_invalid_certs(!verify).with_danger_skip_domain_validation(!verify),
-            ));
+            b = b.ssl_opts(Some(SslOpts::default().with_danger_accept_invalid_certs(!verify).with_danger_skip_domain_validation(!verify)));
         }
         if self.read_only {
             b = b.init(vec!["SET SESSION TRANSACTION READ ONLY"]);
@@ -104,10 +92,7 @@ impl MyTarget {
     }
 
     pub async fn connect(&self, database: Option<&str>) -> Result<Conn> {
-        tokio::time::timeout(self.timeout, Conn::new(self.opts(database, false)))
-            .await
-            .map_err(|_| Error::connection(format!("Timed out connecting to {}:{}", self.host, self.port)))?
-            .map_err(my_err)
+        tokio::time::timeout(self.timeout, Conn::new(self.opts(database, false))).await.map_err(|_| Error::connection(format!("Timed out connecting to {}:{}", self.host, self.port)))?.map_err(my_err)
     }
 }
 
@@ -155,13 +140,25 @@ fn type_name(c: &mysql_async::Column) -> String {
         MYSQL_TYPE_SET => "set",
         MYSQL_TYPE_GEOMETRY => "geometry",
         MYSQL_TYPE_TINY_BLOB | MYSQL_TYPE_MEDIUM_BLOB | MYSQL_TYPE_LONG_BLOB | MYSQL_TYPE_BLOB => {
-            if binary { "blob" } else { "text" }
+            if binary {
+                "blob"
+            } else {
+                "text"
+            }
         }
         MYSQL_TYPE_VAR_STRING | MYSQL_TYPE_VARCHAR => {
-            if binary { "varbinary" } else { "varchar" }
+            if binary {
+                "varbinary"
+            } else {
+                "varchar"
+            }
         }
         MYSQL_TYPE_STRING => {
-            if binary { "binary" } else { "char" }
+            if binary {
+                "binary"
+            } else {
+                "char"
+            }
         }
         MYSQL_TYPE_NULL => "null",
         _ => "",
@@ -201,11 +198,7 @@ pub(crate) fn to_value(v: &mysql_async::Value, col: Option<&mysql_async::Column>
         M::Time(neg, days, h, mi, s, us) => {
             let hours = *days as u64 * 24 + *h as u64;
             let sign = if *neg { "-" } else { "" };
-            Value::Text(if *us > 0 {
-                format!("{sign}{hours:02}:{mi:02}:{s:02}.{us:06}")
-            } else {
-                format!("{sign}{hours:02}:{mi:02}:{s:02}")
-            })
+            Value::Text(if *us > 0 { format!("{sign}{hours:02}:{mi:02}:{s:02}.{us:06}") } else { format!("{sign}{hours:02}:{mi:02}:{s:02}") })
         }
     }
 }
@@ -303,11 +296,8 @@ impl Driver for MySqlDriver {
             read_only: p.read_only,
         };
         let mut conn = target.connect(None).await?;
-        let (version, comment, user, charset): (String, String, String, String) = conn
-            .query_first("SELECT VERSION(), @@version_comment, CURRENT_USER(), @@character_set_server")
-            .await
-            .map_err(my_err)?
-            .ok_or_else(|| Error::other("Server returned no version"))?;
+        let (version, comment, user, charset): (String, String, String, String) =
+            conn.query_first("SELECT VERSION(), @@version_comment, CURRENT_USER(), @@character_set_server").await.map_err(my_err)?.ok_or_else(|| Error::other("Server returned no version"))?;
         let ver = conn.server_version();
         let mariadb = version.to_ascii_lowercase().contains("mariadb");
         let _ = conn.disconnect().await;
@@ -315,12 +305,7 @@ impl Driver for MySqlDriver {
         let info = ServerInfo {
             product,
             version: version.clone(),
-            details: vec![
-                ("Distribution".into(), comment),
-                ("User".into(), user),
-                ("Charset".into(), charset),
-                ("Server".into(), format!("{}:{}", target.host, target.port)),
-            ],
+            details: vec![("Distribution".into(), comment), ("User".into(), user), ("Charset".into(), charset), ("Server".into(), format!("{}:{}", target.host, target.port))],
         };
         let pool = Pool::new(target.opts(None, true));
         Ok(SessionHandle::Sql(Arc::new(MySession { target, pool, info, mariadb, version: ver })))
@@ -337,24 +322,14 @@ pub(crate) struct MySession {
 
 impl MySession {
     pub async fn conn(&self) -> Result<Conn> {
-        tokio::time::timeout(self.target.timeout, self.pool.get_conn())
-            .await
-            .map_err(|_| Error::connection("Timed out waiting for a connection"))?
-            .map_err(my_err)
+        tokio::time::timeout(self.target.timeout, self.pool.get_conn()).await.map_err(|_| Error::connection("Timed out waiting for a connection"))?.map_err(my_err)
     }
 
     /// Rows of a metadata query, each cell as text.
     pub async fn text_rows(&self, sql: &str, params: Vec<mysql_async::Value>) -> Result<Vec<Vec<Option<String>>>> {
         let mut c = self.conn().await?;
-        let rows: Vec<mysql_async::Row> = if params.is_empty() {
-            c.query(sql).await.map_err(my_err)?
-        } else {
-            c.exec(sql, mysql_async::Params::Positional(params)).await.map_err(my_err)?
-        };
-        Ok(rows
-            .iter()
-            .map(|r| (0..r.len()).map(|i| to_value(r.as_ref(i).unwrap_or(&mysql_async::Value::NULL), r.columns_ref().get(i)).to_text()).collect())
-            .collect())
+        let rows: Vec<mysql_async::Row> = if params.is_empty() { c.query(sql).await.map_err(my_err)? } else { c.exec(sql, mysql_async::Params::Positional(params)).await.map_err(my_err)? };
+        Ok(rows.iter().map(|r| (0..r.len()).map(|i| to_value(r.as_ref(i).unwrap_or(&mysql_async::Value::NULL), r.columns_ref().get(i)).to_text()).collect()).collect())
     }
 
     pub async fn result(&self, sql: &str, params: Vec<mysql_async::Value>) -> Result<ResultSet> {
@@ -571,13 +546,10 @@ impl SqlSession for MySession {
 
     async fn catalog(&self, database: Option<&str>) -> Result<Catalog> {
         let db = database.map(str::to_owned).or_else(|| self.target.database.clone());
-        let mut cat = Catalog::default();
-        cat.schemas = self
-            .text_rows("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY 1", vec![])
-            .await?
-            .into_iter()
-            .filter_map(|r| r.into_iter().next().flatten())
-            .collect();
+        let mut cat = Catalog {
+            schemas: self.text_rows("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY 1", vec![]).await?.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect(),
+            ..Default::default()
+        };
         let Some(db) = db else { return Ok(cat) };
         let rows = self
             .text_rows(
@@ -708,9 +680,25 @@ impl SqlSession for MySession {
         match target {
             GrantTarget::Table(_) => vec!["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX", "REFERENCES", "TRIGGER", "SHOW VIEW", "ALL PRIVILEGES"],
             _ => vec![
-                "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX", "CREATE VIEW", "SHOW VIEW",
-                "CREATE ROUTINE", "ALTER ROUTINE", "EXECUTE", "EVENT", "TRIGGER", "LOCK TABLES", "REFERENCES",
-                "CREATE TEMPORARY TABLES", "ALL PRIVILEGES",
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "CREATE",
+                "DROP",
+                "ALTER",
+                "INDEX",
+                "CREATE VIEW",
+                "SHOW VIEW",
+                "CREATE ROUTINE",
+                "ALTER ROUTINE",
+                "EXECUTE",
+                "EVENT",
+                "TRIGGER",
+                "LOCK TABLES",
+                "REFERENCES",
+                "CREATE TEMPORARY TABLES",
+                "ALL PRIVILEGES",
             ],
         }
     }
@@ -728,10 +716,7 @@ fn where_key(key: &RowKey) -> Result<(String, Vec<mysql_async::Value>)> {
     match key {
         RowKey::RowId(_) => Err(Error::unsupported("MySQL rows are edited by primary key only")),
         RowKey::PrimaryKey(cols) => {
-            let w: Vec<String> = cols
-                .iter()
-                .map(|(c, v)| if v.is_null() { format!("{} IS NULL", D.quote_ident(c)) } else { format!("{} = ?", D.quote_ident(c)) })
-                .collect();
+            let w: Vec<String> = cols.iter().map(|(c, v)| if v.is_null() { format!("{} IS NULL", D.quote_ident(c)) } else { format!("{} = ?", D.quote_ident(c)) }).collect();
             Ok((w.join(" AND "), cols.iter().filter(|(_, v)| !v.is_null()).map(|(_, v)| bind(v)).collect()))
         }
     }
@@ -756,10 +741,11 @@ impl SqlConsole for MyConsole {
             let t = Instant::now();
             let outcome = run_text(&mut conn, &sql, opts.max_rows).await;
             let failed = outcome.is_err();
-            if !failed && leading_keyword(&sql) == "USE" {
-                if let Ok(Some(db)) = conn.query_first::<Option<String>, _>("SELECT DATABASE()").await {
-                    *self.database.lock() = db;
-                }
+            if !failed
+                && leading_keyword(&sql) == "USE"
+                && let Ok(Some(db)) = conn.query_first::<Option<String>, _>("SELECT DATABASE()").await
+            {
+                *self.database.lock() = db;
             }
             out.push(StatementResult { sql, elapsed: t.elapsed(), outcome });
             if failed {

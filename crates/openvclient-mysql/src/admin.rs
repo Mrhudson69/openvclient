@@ -29,11 +29,7 @@ pub async fn children(s: &MySession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 let name = r[0].clone().unwrap_or_default();
                 let n = r[2].clone().unwrap_or_default();
                 let size = human_size(r[1].as_ref());
-                let detail = [if n == "0" { String::new() } else { format!("{n} tables") }, size]
-                    .into_iter()
-                    .filter(|x| !x.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" · ");
+                let detail = [if n == "0" { String::new() } else { format!("{n} tables") }, size].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" · ");
                 TreeNode::new(ObjectKind::Database, name.clone(), ObjPath::db(name)).detail(detail)
             })
             .collect();
@@ -95,24 +91,13 @@ pub async fn children(s: &MySession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 })
                 .collect())
         }
-        ObjectKind::Folder(FolderKind::Views) => {
-            one("SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA = ? ORDER BY 1", ObjectKind::View, true).await
-        }
+        ObjectKind::Folder(FolderKind::Views) => one("SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA = ? ORDER BY 1", ObjectKind::View, true).await,
         ObjectKind::Folder(FolderKind::Procedures) => {
-            one(
-                "SELECT ROUTINE_NAME FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE' ORDER BY 1",
-                ObjectKind::Procedure,
-                true,
-            )
-            .await
+            one("SELECT ROUTINE_NAME FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE' ORDER BY 1", ObjectKind::Procedure, true).await
         }
         ObjectKind::Folder(FolderKind::Functions) => {
-            one(
-                "SELECT ROUTINE_NAME, CONCAT('→ ', DTD_IDENTIFIER) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'FUNCTION' ORDER BY 1",
-                ObjectKind::Function,
-                true,
-            )
-            .await
+            one("SELECT ROUTINE_NAME, CONCAT('→ ', DTD_IDENTIFIER) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'FUNCTION' ORDER BY 1", ObjectKind::Function, true)
+                .await
         }
         ObjectKind::Folder(FolderKind::Triggers) if path.name.is_none() => {
             one(
@@ -122,19 +107,10 @@ pub async fn children(s: &MySession, node: Option<(ObjectKind, ObjPath)>) -> Res
             )
             .await
         }
-        ObjectKind::Folder(FolderKind::Events) => {
-            one(
-                "SELECT EVENT_NAME, STATUS FROM information_schema.EVENTS WHERE EVENT_SCHEMA = ? ORDER BY 1",
-                ObjectKind::Event,
-                true,
-            )
-            .await
+        ObjectKind::Folder(FolderKind::Events) => one("SELECT EVENT_NAME, STATUS FROM information_schema.EVENTS WHERE EVENT_SCHEMA = ? ORDER BY 1", ObjectKind::Event, true).await,
+        ObjectKind::Table => {
+            Ok(vec![TreeNode::folder(FolderKind::Columns, path.clone()), TreeNode::folder(FolderKind::Indexes, path.clone()), TreeNode::folder(FolderKind::Constraints, path.clone())])
         }
-        ObjectKind::Table => Ok(vec![
-            TreeNode::folder(FolderKind::Columns, path.clone()),
-            TreeNode::folder(FolderKind::Indexes, path.clone()),
-            TreeNode::folder(FolderKind::Constraints, path.clone()),
-        ]),
         ObjectKind::Folder(FolderKind::Columns) => Ok(columns(s, &path)
             .await?
             .into_iter()
@@ -164,12 +140,15 @@ pub async fn children(s: &MySession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 .into_iter()
                 .map(|r| {
                     let name = r[0].clone().unwrap_or_default();
-                    let uniq = if name == "PRIMARY" { "primary key" } else if r[1].as_deref() == Some("0") { "unique" } else { "" };
-                    let d = [uniq.to_string(), format!("({})", r[2].clone().unwrap_or_default()), r[3].clone().unwrap_or_default()]
-                        .into_iter()
-                        .filter(|x| !x.is_empty())
-                        .collect::<Vec<_>>()
-                        .join(" · ");
+                    let uniq = if name == "PRIMARY" {
+                        "primary key"
+                    } else if r[1].as_deref() == Some("0") {
+                        "unique"
+                    } else {
+                        ""
+                    };
+                    let d =
+                        [uniq.to_string(), format!("({})", r[2].clone().unwrap_or_default()), r[3].clone().unwrap_or_default()].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" · ");
                     TreeNode::new(ObjectKind::Index, name.clone(), path.clone().with_sub(name)).detail(d)
                 })
                 .collect())
@@ -185,8 +164,7 @@ pub async fn children(s: &MySession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 .into_iter()
                 .map(|r| {
                     let name = r[0].clone().unwrap_or_default();
-                    TreeNode::new(ObjectKind::Constraint, name.clone(), path.clone().with_sub(name))
-                        .detail(r[1].clone().unwrap_or_default().to_lowercase())
+                    TreeNode::new(ObjectKind::Constraint, name.clone(), path.clone().with_sub(name)).detail(r[1].clone().unwrap_or_default().to_lowercase())
                 })
                 .collect())
         }
@@ -244,16 +222,8 @@ pub async fn drop_object(s: &MySession, kind: ObjectKind, path: &ObjPath) -> Res
     let db = s.db_of(path)?;
     let sql = match kind {
         ObjectKind::Database => format!("DROP DATABASE {}", D.quote_ident(&db)),
-        ObjectKind::Index => format!(
-            "DROP INDEX {} ON {}",
-            D.quote_ident(path.sub.as_deref().unwrap_or_default()),
-            D.qualified(Some(&db), path.name()?)
-        ),
-        ObjectKind::Column => format!(
-            "ALTER TABLE {} DROP COLUMN {}",
-            D.qualified(Some(&db), path.name()?),
-            D.quote_ident(path.sub.as_deref().unwrap_or_default())
-        ),
+        ObjectKind::Index => format!("DROP INDEX {} ON {}", D.quote_ident(path.sub.as_deref().unwrap_or_default()), D.qualified(Some(&db), path.name()?)),
+        ObjectKind::Column => format!("ALTER TABLE {} DROP COLUMN {}", D.qualified(Some(&db), path.name()?), D.quote_ident(path.sub.as_deref().unwrap_or_default())),
         ObjectKind::Constraint => {
             let c = path.sub.clone().unwrap_or_default();
             if c == "PRIMARY" {
@@ -299,12 +269,8 @@ pub async fn locks(s: &MySession) -> Result<ResultSet> {
 }
 
 pub async fn metrics(s: &MySession) -> Result<Vec<Metric>> {
-    let status: std::collections::HashMap<String, String> = s
-        .text_rows("SHOW GLOBAL STATUS", vec![])
-        .await?
-        .into_iter()
-        .filter_map(|r| Some((r[0].clone()?.to_ascii_lowercase(), r[1].clone().unwrap_or_default())))
-        .collect();
+    let status: std::collections::HashMap<String, String> =
+        s.text_rows("SHOW GLOBAL STATUS", vec![]).await?.into_iter().filter_map(|r| Some((r[0].clone()?.to_ascii_lowercase(), r[1].clone().unwrap_or_default()))).collect();
     let vars: std::collections::HashMap<String, String> = s
         .text_rows(
             "SHOW GLOBAL VARIABLES WHERE Variable_name IN ('max_connections','innodb_buffer_pool_size','version','long_query_time','slow_query_log','read_only','innodb_flush_log_at_trx_commit','sync_binlog','log_bin')",
@@ -413,11 +379,7 @@ pub async fn grant(s: &MySession, spec: GrantSpec, revoke: bool) -> Result<()> {
     };
     let who = account(&spec.principal, spec.host.as_deref());
     let privs = spec.privileges.join(", ");
-    let sql = if revoke {
-        format!("REVOKE {privs} ON {on} FROM {who}")
-    } else {
-        format!("GRANT {privs} ON {on} TO {who}{}", if spec.with_grant_option { " WITH GRANT OPTION" } else { "" })
-    };
+    let sql = if revoke { format!("REVOKE {privs} ON {on} FROM {who}") } else { format!("GRANT {privs} ON {on} TO {who}{}", if spec.with_grant_option { " WITH GRANT OPTION" } else { "" }) };
     s.run(None, &sql).await.map(|_| ())
 }
 

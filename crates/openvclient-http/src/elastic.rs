@@ -146,7 +146,11 @@ impl ResourceSession for EsSession {
                         i.get("store.size").and_then(|x| x.as_str()).unwrap_or("")
                     );
                     let closed = i.get("status").and_then(|x| x.as_str()) == Some("close");
-                    user.push(Node::new(format!("i/{name}"), &name, if closed { "closed_index" } else { "index" }, NodeIcon::Index).folder().detail(if closed { "closed".to_string() } else { detail }));
+                    user.push(Node::new(format!("i/{name}"), &name, if closed { "closed_index" } else { "index" }, NodeIcon::Index).folder().detail(if closed {
+                        "closed".to_string()
+                    } else {
+                        detail
+                    }));
                 }
                 out.extend(user);
                 if system > 0 {
@@ -156,10 +160,7 @@ impl ResourceSession for EsSession {
             }
             Some(id) if id.starts_with("i/") => {
                 let name = &id[2..];
-                Ok(vec![
-                    Node::new(format!("m/{name}"), "Mapping", "mapping", NodeIcon::File),
-                    Node::new(format!("s/{name}"), "Settings", "settings", NodeIcon::File),
-                ])
+                Ok(vec![Node::new(format!("m/{name}"), "Mapping", "mapping", NodeIcon::File), Node::new(format!("s/{name}"), "Settings", "settings", NodeIcon::File)])
             }
             _ => Ok(Vec::new()),
         }
@@ -182,10 +183,12 @@ impl ResourceSession for EsSession {
         let body = if f.starts_with('{') {
             // Full Query DSL; paging fields are added unless given.
             let mut b: J = serde_json::from_str(f).map_err(|e| Error::invalid(format!("Not valid JSON: {e}")))?;
-            if let Some(o) = b.as_object_mut() {
-                if !o.contains_key("query") && !o.contains_key("aggs") && !o.contains_key("size") {
-                    b = json!({ "query": b });
-                }
+            if let Some(o) = b.as_object_mut()
+                && !o.contains_key("query")
+                && !o.contains_key("aggs")
+                && !o.contains_key("size")
+            {
+                b = json!({ "query": b });
             }
             let o = b.as_object_mut().unwrap();
             o.entry("size").or_insert(json!(opts.limit));
@@ -198,10 +201,10 @@ impl ResourceSession for EsSession {
             json!({ "query": { "query_string": { "query": f } }, "size": opts.limit, "from": opts.offset, "track_total_hits": true })
         };
         let v = self.call(Method::POST, &format!("/{}/_search", enc(name)), Some(body)).await?;
-        if let Some(aggs) = v.get("aggregations") {
-            if v.pointer("/hits/hits").and_then(|h| h.as_array()).is_none_or(|h| h.is_empty()) {
-                return Ok(Content::Json(pretty(aggs)));
-            }
+        if let Some(aggs) = v.get("aggregations")
+            && v.pointer("/hits/hits").and_then(|h| h.as_array()).is_none_or(|h| h.is_empty())
+        {
+            return Ok(Content::Json(pretty(aggs)));
         }
         let (rs, note) = hits_table(&v);
         Ok(Content::TableWithNote(rs, note))
@@ -213,11 +216,13 @@ impl ResourceSession for EsSession {
 
     fn actions(&self, kind: &str) -> Vec<ActionSpec> {
         match kind {
-            "" => vec![ActionSpec::new("create_index", "New index…")
-                .field(FieldSpec::text("name", "Index").required())
-                .field(FieldSpec::text("shards", "Shards").kind(FieldKind::Number).default("1"))
-                .field(FieldSpec::text("replicas", "Replicas").kind(FieldKind::Number).default("0"))
-                .field(FieldSpec::text("mappings_json", "Mappings (JSON)").placeholder(r#"{"properties": {"title": {"type": "text"}}}"#))],
+            "" => vec![
+                ActionSpec::new("create_index", "New index…")
+                    .field(FieldSpec::text("name", "Index").required())
+                    .field(FieldSpec::text("shards", "Shards").kind(FieldKind::Number).default("1"))
+                    .field(FieldSpec::text("replicas", "Replicas").kind(FieldKind::Number).default("0"))
+                    .field(FieldSpec::text("mappings_json", "Mappings (JSON)").placeholder(r#"{"properties": {"title": {"type": "text"}}}"#)),
+            ],
             "index" => vec![
                 ActionSpec::new("index_doc", "Index document…").primary().field(FieldSpec::text("document_json", "Document (JSON)").required()).field(FieldSpec::text("id", "ID").placeholder("auto")),
                 ActionSpec::new("delete_doc", "Delete document by ID…").destructive().field(FieldSpec::text("id", "ID").required()),
@@ -305,13 +310,13 @@ impl ResourceSession for EsSession {
             r = r.json(&v);
         }
         let (status, text) = self.http.send(r).await?;
-        if path.contains("_search") {
-            if let Ok(v) = serde_json::from_str::<J>(&text) {
-                if v.pointer("/hits/hits").is_some() && status < 400 {
-                    let (rs, note) = hits_table(&v);
-                    return Ok(Content::TableWithNote(rs, note));
-                }
-            }
+        if path.contains("_search")
+            && let Ok(v) = serde_json::from_str::<J>(&text)
+            && v.pointer("/hits/hits").is_some()
+            && status < 400
+        {
+            let (rs, note) = hits_table(&v);
+            return Ok(Content::TableWithNote(rs, note));
         }
         if status >= 400 {
             return Err(Error::server(format!("HTTP {status}")).with_detail(text));

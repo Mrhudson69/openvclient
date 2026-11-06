@@ -15,8 +15,7 @@ pub enum Environment {
 }
 
 impl Environment {
-    pub const ALL: [Environment; 4] =
-        [Environment::Development, Environment::Testing, Environment::Staging, Environment::Production];
+    pub const ALL: [Environment; 4] = [Environment::Development, Environment::Testing, Environment::Staging, Environment::Production];
 
     pub fn label(self) -> &'static str {
         match self {

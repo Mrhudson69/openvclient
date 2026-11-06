@@ -8,10 +8,7 @@ use async_trait::async_trait;
 use openvclient_core::explain::{ExplainResult, PlanNode};
 use openvclient_core::sql::*;
 use openvclient_core::sqltext::{Dialect, leading_keyword};
-use openvclient_core::{
-    Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ResultSet, ServerInfo,
-    ServiceSession, SessionHandle, Value,
-};
+use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 use parking_lot::Mutex;
 use reqwest::Method;
 use serde_json::Value as J;
@@ -108,9 +105,7 @@ impl Ch {
         }
         let v: J = serde_json::from_str(&text).map_err(|e| Error::other(format!("Unexpected response: {e}")))?;
         let meta = v.get("meta").and_then(|m| m.as_array()).cloned().unwrap_or_default();
-        let mut rs = ResultSet::new(
-            meta.iter().map(|c| ColumnMeta::new(c.get("name").and_then(|n| n.as_str()).unwrap_or(""), c.get("type").and_then(|n| n.as_str()).unwrap_or(""))).collect(),
-        );
+        let mut rs = ResultSet::new(meta.iter().map(|c| ColumnMeta::new(c.get("name").and_then(|n| n.as_str()).unwrap_or(""), c.get("type").and_then(|n| n.as_str()).unwrap_or(""))).collect());
         for row in v.get("data").and_then(|d| d.as_array()).cloned().unwrap_or_default() {
             if rs.rows.len() >= max {
                 rs.truncated = true;
@@ -228,7 +223,13 @@ impl SqlSession for ChSession {
             ObjectKind::Database => Ok(vec![TreeNode::folder(FolderKind::Tables, ObjPath::db(&db)), TreeNode::folder(FolderKind::Views, ObjPath::db(&db))]),
             ObjectKind::Folder(f @ (FolderKind::Tables | FolderKind::Views)) => {
                 let cond = if f == FolderKind::Views { "engine IN ('View','MaterializedView','LiveView','WindowView')" } else { "engine NOT IN ('View','MaterializedView','LiveView','WindowView')" };
-                let rows = self.ch.rows(&format!("SELECT name, engine, total_rows, formatReadableSize(total_bytes) FROM system.tables WHERE database = {} AND {cond} AND NOT is_temporary ORDER BY name", lit(&db)), None).await?;
+                let rows = self
+                    .ch
+                    .rows(
+                        &format!("SELECT name, engine, total_rows, formatReadableSize(total_bytes) FROM system.tables WHERE database = {} AND {cond} AND NOT is_temporary ORDER BY name", lit(&db)),
+                        None,
+                    )
+                    .await?;
                 Ok(rows
                     .into_iter()
                     .map(|r| {
@@ -274,7 +275,11 @@ impl SqlSession for ChSession {
         let rows = self
             .ch
             .rows(
-                &format!("SELECT name, type, default_kind, default_expression, is_in_primary_key, comment FROM system.columns WHERE database = {} AND table = {} ORDER BY position", lit(&db), lit(path.name()?)),
+                &format!(
+                    "SELECT name, type, default_kind, default_expression, is_in_primary_key, comment FROM system.columns WHERE database = {} AND table = {} ORDER BY position",
+                    lit(&db),
+                    lit(path.name()?)
+                ),
                 None,
             )
             .await?;
@@ -350,7 +355,13 @@ impl SqlSession for ChSession {
 
     async fn open_console(&self, database: Option<String>) -> Result<Arc<dyn SqlConsole>> {
         let session = format!("openvclient-{}", random_id());
-        Ok(Arc::new(ChConsole { ch: self.ch.clone(), session, database: Mutex::new(database.unwrap_or_else(|| self.ch.database.clone())), running: Mutex::new(None), rt: tokio::runtime::Handle::current() }))
+        Ok(Arc::new(ChConsole {
+            ch: self.ch.clone(),
+            session,
+            database: Mutex::new(database.unwrap_or_else(|| self.ch.database.clone())),
+            running: Mutex::new(None),
+            rt: tokio::runtime::Handle::current(),
+        }))
     }
 
     async fn run(&self, database: Option<&str>, sql: &str) -> Result<u64> {
@@ -445,11 +456,27 @@ impl SqlSession for ChSession {
     }
 
     async fn principals(&self) -> Result<ResultSet> {
-        Ok(self.ch.query("SELECT name, storage, auth_type, arrayStringConcat(host_ip, ', ') AS hosts, arrayStringConcat(default_roles_list, ', ') AS default_roles FROM system.users ORDER BY name", None, None, None, usize::MAX).await?.rs.unwrap_or_default())
+        Ok(self
+            .ch
+            .query(
+                "SELECT name, storage, auth_type, arrayStringConcat(host_ip, ', ') AS hosts, arrayStringConcat(default_roles_list, ', ') AS default_roles FROM system.users ORDER BY name",
+                None,
+                None,
+                None,
+                usize::MAX,
+            )
+            .await?
+            .rs
+            .unwrap_or_default())
     }
 
     async fn privileges(&self, principal: &str, _host: Option<&str>) -> Result<ResultSet> {
-        Ok(self.ch.query(&format!("SELECT access_type, database, table, column, is_partial_revoke, grant_option FROM system.grants WHERE user_name = {}", lit(principal)), None, None, None, usize::MAX).await?.rs.unwrap_or_default())
+        Ok(self
+            .ch
+            .query(&format!("SELECT access_type, database, table, column, is_partial_revoke, grant_option FROM system.grants WHERE user_name = {}", lit(principal)), None, None, None, usize::MAX)
+            .await?
+            .rs
+            .unwrap_or_default())
     }
 
     async fn create_principal(&self, spec: PrincipalSpec) -> Result<()> {
@@ -491,10 +518,11 @@ impl SqlConsole for ChConsole {
                 None if kw == "INSERT" => StatementOutcome::Done(format!("INSERT completed{}", if rep.written > 0 { format!(" ({} rows)", rep.written) } else { String::new() })),
                 None => StatementOutcome::Done(format!("{kw} completed")),
             });
-            if outcome.is_ok() && kw == "USE" {
-                if let Some(name) = sql.split_whitespace().nth(1) {
-                    *self.database.lock() = name.trim_matches(['`', '"', ';']).to_string();
-                }
+            if outcome.is_ok()
+                && kw == "USE"
+                && let Some(name) = sql.split_whitespace().nth(1)
+            {
+                *self.database.lock() = name.trim_matches(['`', '"', ';']).to_string();
             }
             let failed = outcome.is_err();
             out.push(StatementResult { sql, elapsed: t.elapsed(), outcome });
@@ -598,7 +626,18 @@ mod tests {
         assert_eq!(s.count_rows(&p, None).await.unwrap(), 1000);
 
         let c = s.open_console(Some("ovc_test".into())).await.unwrap();
-        let r = c.execute(vec!["SET max_threads = 2".into(), "SELECT kind, count() AS n, sum(amount) AS total FROM events GROUP BY kind ORDER BY kind".into(), "SELECT getSetting('max_threads')".into(), "SELECT number FROM numbers(100)".into(), "SELEC broken".into()], ExecOptions { max_rows: 10 }).await;
+        let r = c
+            .execute(
+                vec![
+                    "SET max_threads = 2".into(),
+                    "SELECT kind, count() AS n, sum(amount) AS total FROM events GROUP BY kind ORDER BY kind".into(),
+                    "SELECT getSetting('max_threads')".into(),
+                    "SELECT number FROM numbers(100)".into(),
+                    "SELEC broken".into(),
+                ],
+                ExecOptions { max_rows: 10 },
+            )
+            .await;
         let Ok(StatementOutcome::Rows(rs)) = &r[1].outcome else { panic!("{:?}", r[1].outcome) };
         assert_eq!(rs.rows.len(), 3);
         assert!(rs.columns[1].numeric);
@@ -611,7 +650,9 @@ mod tests {
         assert!(!plan.raw.is_empty());
 
         let c2 = c.clone();
-        let h = tokio::spawn(async move { c2.execute(vec!["SELECT sleepEachRow(1) FROM numbers(20) SETTINGS max_block_size = 1, function_sleep_max_microseconds_per_block = 30000000".into()], ExecOptions::default()).await });
+        let h = tokio::spawn(async move {
+            c2.execute(vec!["SELECT sleepEachRow(1) FROM numbers(20) SETTINGS max_block_size = 1, function_sleep_max_microseconds_per_block = 30000000".into()], ExecOptions::default()).await
+        });
         tokio::time::sleep(Duration::from_millis(1200)).await;
         c.cancel();
         let r = tokio::time::timeout(Duration::from_secs(10), h).await.expect("cancel too slow").unwrap();

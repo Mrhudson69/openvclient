@@ -107,13 +107,7 @@ fn connection_card(ui: &mut egui::Ui, cx: &mut AppCtx, p: &openvclient_core::Con
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     let hovered = resp.hovered();
-    ui.painter().rect(
-        rect,
-        10.0,
-        if hovered { t.muted } else { t.card },
-        egui::Stroke::new(if hovered { 1.5 } else { 1.0 }, if hovered { t.ring } else { t.border }),
-        egui::StrokeKind::Inside,
-    );
+    ui.painter().rect(rect, 10.0, if hovered { t.muted } else { t.card }, egui::Stroke::new(if hovered { 1.5 } else { 1.0 }, if hovered { t.ring } else { t.border }), egui::StrokeKind::Inside);
     let env = theme::env_color(ui, p.environment);
     // Environment stripe on the left edge (also stated in text by the badge).
     ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 10.0), egui::vec2(3.0, h - 20.0)), 2.0, env);

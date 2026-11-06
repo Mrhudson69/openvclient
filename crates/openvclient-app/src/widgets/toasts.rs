@@ -81,49 +81,46 @@ impl Toasts {
             return;
         }
         let mut close = None;
-        egui::Area::new(egui::Id::unique("toasts"))
-            .anchor(Align2::RIGHT_BOTTOM, [-16.0, -36.0])
-            .order(egui::Order::Tooltip)
-            .show(ctx, |ui| {
-                ui.set_max_width(380.0);
-                let t = theme::tokens(ui);
-                let hidden = self.items.len().saturating_sub(3);
-                if hidden > 0 {
-                    ui.label(RichText::new(format!("+{hidden} more")).small().color(t.muted_fg));
-                }
-                for item in self.items.iter().rev().take(3) {
-                    let (icon, color) = match item.level {
-                        Level::Success => (ICON_CHECK, t.accent),
-                        Level::Info => (ICON_INFO, t.info),
-                        Level::Warning => (ICON_WARNING, t.warning),
-                        Level::Error => (ICON_ERROR, t.destructive),
-                    };
-                    egui::Frame::popup(ui.style()).stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.6))).show(ui, |ui| {
-                        ui.set_width(360.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(String::from(icon)).color(color).size(theme::icon::LG));
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(&item.title).strong());
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.small_button(String::from(ICON_CLOSE)).on_hover_text("Dismiss").clicked() {
-                                            close = Some(item.id);
-                                        }
-                                        if item.body.is_some() && ui.small_button(String::from(ICON_CONTENT_COPY)).on_hover_text("Copy message").clicked() {
-                                            ui.ctx().copy_text(format!("{}\n{}", item.title, item.body.clone().unwrap_or_default()));
-                                        }
-                                    });
+        egui::Area::new(egui::Id::unique("toasts")).anchor(Align2::RIGHT_BOTTOM, [-16.0, -36.0]).order(egui::Order::Tooltip).show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            let t = theme::tokens(ui);
+            let hidden = self.items.len().saturating_sub(3);
+            if hidden > 0 {
+                ui.label(RichText::new(format!("+{hidden} more")).small().color(t.muted_fg));
+            }
+            for item in self.items.iter().rev().take(3) {
+                let (icon, color) = match item.level {
+                    Level::Success => (ICON_CHECK, t.accent),
+                    Level::Info => (ICON_INFO, t.info),
+                    Level::Warning => (ICON_WARNING, t.warning),
+                    Level::Error => (ICON_ERROR, t.destructive),
+                };
+                egui::Frame::popup(ui.style()).stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.6))).show(ui, |ui| {
+                    ui.set_width(360.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(String::from(icon)).color(color).size(theme::icon::LG));
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(&item.title).strong());
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.small_button(String::from(ICON_CLOSE)).on_hover_text("Dismiss").clicked() {
+                                        close = Some(item.id);
+                                    }
+                                    if item.body.is_some() && ui.small_button(String::from(ICON_CONTENT_COPY)).on_hover_text("Copy message").clicked() {
+                                        ui.ctx().copy_text(format!("{}\n{}", item.title, item.body.clone().unwrap_or_default()));
+                                    }
                                 });
-                                if let Some(b) = &item.body {
-                                    let shown: String = b.chars().take(600).collect();
-                                    ui.label(RichText::new(shown).color(t.muted_fg));
-                                }
                             });
+                            if let Some(b) = &item.body {
+                                let shown: String = b.chars().take(600).collect();
+                                ui.label(RichText::new(shown).color(t.muted_fg));
+                            }
                         });
                     });
-                    ui.add_space(theme::space::SM);
-                }
-            });
+                });
+                ui.add_space(theme::space::SM);
+            }
+        });
         if let Some(id) = close {
             self.items.retain(|t| t.id != id);
         }

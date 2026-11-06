@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use openvclient_core::resource::*;
-use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, ResultSet, Result, ServerInfo, ServiceSession, SessionHandle, Value};
+use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 use rusty_s3::actions::{CreateBucket, DeleteBucket, DeleteObject, GetObject, HeadObject, ListObjectsV2, PutObject};
 use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
 use url::Url;
@@ -29,7 +29,10 @@ impl Default for S3Driver {
                 description: "AWS S3 and S3-compatible storage: MinIO, R2, Wasabi, B2, Ceph",
                 badge: "S3",
                 fields: vec![
-                    FieldSpec::text("endpoint", "Endpoint URL").default("https://s3.amazonaws.com").required().help("AWS: https://s3.<region>.amazonaws.com · MinIO: http://host:9000 · R2: https://<account>.r2.cloudflarestorage.com"),
+                    FieldSpec::text("endpoint", "Endpoint URL")
+                        .default("https://s3.amazonaws.com")
+                        .required()
+                        .help("AWS: https://s3.<region>.amazonaws.com · MinIO: http://host:9000 · R2: https://<account>.r2.cloudflarestorage.com"),
                     FieldSpec::text("region", "Region").default("us-east-1"),
                     FieldSpec::text("access_key", "Access key ID").required(),
                     FieldSpec::text("password", "Secret access key").kind(FieldKind::Secret),
@@ -65,19 +68,75 @@ impl S3Driver {
     /// Every S3-compatible provider preset shipped in the app.
     pub fn providers() -> Vec<Self> {
         vec![
-            Self::flavor("b2", "Backblaze B2", "Backblaze B2 cloud storage (S3-compatible API)", "https://s3.us-west-004.backblazeb2.com", "us-west-004", false, "https://s3.<region>.backblazeb2.com, e.g. us-west-004, eu-central-003. Use an application key ID and key."),
-            Self::flavor("idrive_e2", "IDrive e2", "IDrive e2 hot cloud storage", "https://s3.us-west-1.idrivee2.com", "us-west-1", true, "Your e2 region endpoint from the IDrive e2 console, e.g. https://xxxx.<region>.idrivee2-NN.com"),
+            Self::flavor(
+                "b2",
+                "Backblaze B2",
+                "Backblaze B2 cloud storage (S3-compatible API)",
+                "https://s3.us-west-004.backblazeb2.com",
+                "us-west-004",
+                false,
+                "https://s3.<region>.backblazeb2.com, e.g. us-west-004, eu-central-003. Use an application key ID and key.",
+            ),
+            Self::flavor(
+                "idrive_e2",
+                "IDrive e2",
+                "IDrive e2 hot cloud storage",
+                "https://s3.us-west-1.idrivee2.com",
+                "us-west-1",
+                true,
+                "Your e2 region endpoint from the IDrive e2 console, e.g. https://xxxx.<region>.idrivee2-NN.com",
+            ),
             Self::flavor("wasabi", "Wasabi", "Wasabi hot cloud storage", "https://s3.wasabisys.com", "us-east-1", false, "https://s3.<region>.wasabisys.com"),
-            Self::flavor("r2", "Cloudflare R2", "Cloudflare R2 object storage", "https://<account-id>.r2.cloudflarestorage.com", "auto", true, "https://<account-id>.r2.cloudflarestorage.com · region 'auto'"),
+            Self::flavor(
+                "r2",
+                "Cloudflare R2",
+                "Cloudflare R2 object storage",
+                "https://<account-id>.r2.cloudflarestorage.com",
+                "auto",
+                true,
+                "https://<account-id>.r2.cloudflarestorage.com · region 'auto'",
+            ),
             Self::flavor("do_spaces", "DigitalOcean Spaces", "DigitalOcean Spaces object storage", "https://nyc3.digitaloceanspaces.com", "nyc3", false, "https://<region>.digitaloceanspaces.com"),
-            Self::flavor("gcs", "Google Cloud Storage", "Google Cloud Storage via the S3 interoperability API (HMAC keys)", "https://storage.googleapis.com", "auto", true, "https://storage.googleapis.com · create HMAC keys under Cloud Storage → Settings → Interoperability"),
-            Self::flavor("oci", "Oracle Object Storage", "Oracle Cloud object storage (S3 compatibility API)", "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com", "us-ashburn-1", true, "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com · use a Customer Secret Key"),
+            Self::flavor(
+                "gcs",
+                "Google Cloud Storage",
+                "Google Cloud Storage via the S3 interoperability API (HMAC keys)",
+                "https://storage.googleapis.com",
+                "auto",
+                true,
+                "https://storage.googleapis.com · create HMAC keys under Cloud Storage → Settings → Interoperability",
+            ),
+            Self::flavor(
+                "oci",
+                "Oracle Object Storage",
+                "Oracle Cloud object storage (S3 compatibility API)",
+                "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com",
+                "us-ashburn-1",
+                true,
+                "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com · use a Customer Secret Key",
+            ),
             Self::flavor("linode", "Akamai / Linode Object Storage", "Linode (Akamai) object storage", "https://us-east-1.linodeobjects.com", "us-east-1", false, "https://<region>.linodeobjects.com"),
             Self::flavor("scaleway", "Scaleway Object Storage", "Scaleway object storage", "https://s3.fr-par.scw.cloud", "fr-par", false, "https://s3.<region>.scw.cloud"),
             Self::flavor("hetzner", "Hetzner Object Storage", "Hetzner object storage", "https://fsn1.your-objectstorage.com", "fsn1", false, "https://<location>.your-objectstorage.com"),
-            Self::flavor("storj", "Storj", "Storj decentralized storage (S3 gateway)", "https://gateway.storjshare.io", "us-1", true, "https://gateway.storjshare.io · create S3 credentials in the Storj console"),
+            Self::flavor(
+                "storj",
+                "Storj",
+                "Storj decentralized storage (S3 gateway)",
+                "https://gateway.storjshare.io",
+                "us-1",
+                true,
+                "https://gateway.storjshare.io · create S3 credentials in the Storj console",
+            ),
             Self::flavor("minio", "MinIO", "MinIO and other self-hosted S3 servers (SeaweedFS, Ceph RGW, Garage)", "http://localhost:9000", "us-east-1", true, "http(s)://host:9000"),
-            Self::flavor("alibaba_oss", "Alibaba Cloud OSS", "Alibaba Cloud Object Storage Service (S3-compatible)", "https://oss-cn-hangzhou.aliyuncs.com", "oss-cn-hangzhou", false, "https://oss-<region>.aliyuncs.com"),
+            Self::flavor(
+                "alibaba_oss",
+                "Alibaba Cloud OSS",
+                "Alibaba Cloud Object Storage Service (S3-compatible)",
+                "https://oss-cn-hangzhou.aliyuncs.com",
+                "oss-cn-hangzhou",
+                false,
+                "https://oss-<region>.aliyuncs.com",
+            ),
         ]
     }
 }
@@ -99,7 +158,8 @@ impl Driver for S3Driver {
             Some(t) => Credentials::new_with_token(key, secret, t.to_string()),
             None => Credentials::new(key, secret),
         };
-        let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).timeout(Duration::from_secs(600)).user_agent("OpenVClient").build().map_err(|e| Error::other(e.to_string()))?;
+        let client =
+            reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).timeout(Duration::from_secs(600)).user_agent("OpenVClient").build().map_err(|e| Error::other(e.to_string()))?;
         let s = S3Session {
             endpoint,
             region: p.get_or("region", "us-east-1").to_string(),
@@ -113,7 +173,11 @@ impl Driver for S3Driver {
         // Validate credentials up front.
         let buckets = s.buckets().await?;
         let product = if s.endpoint.host_str().is_some_and(|h| h.ends_with("amazonaws.com")) { "Amazon S3" } else { "S3-compatible storage" };
-        let info = ServerInfo { product: product.into(), version: String::new(), details: vec![("Endpoint".into(), s.endpoint.to_string()), ("Region".into(), s.region.clone()), ("Buckets".into(), buckets.len().to_string())] };
+        let info = ServerInfo {
+            product: product.into(),
+            version: String::new(),
+            details: vec![("Endpoint".into(), s.endpoint.to_string()), ("Region".into(), s.region.clone()), ("Buckets".into(), buckets.len().to_string())],
+        };
         Ok(SessionHandle::Resource(Arc::new(S3Session { info, ..s })))
     }
 }
@@ -240,7 +304,9 @@ impl ResourceSession for S3Session {
         }
         let r = self.list(bucket, prefix, None, 1000).await?;
         let mut out: Vec<Node> = r.common_prefixes.iter().map(|c| Node::new(format!("p/{bucket}/{}", c.prefix), leaf(&c.prefix), "prefix", NodeIcon::Folder).folder()).collect();
-        out.extend(r.contents.iter().filter(|o| o.key != prefix).map(|o| Node::new(format!("o/{bucket}/{}", o.key), leaf(&o.key), "object", NodeIcon::File).detail(o.size.map(human).unwrap_or_default())));
+        out.extend(
+            r.contents.iter().filter(|o| o.key != prefix).map(|o| Node::new(format!("o/{bucket}/{}", o.key), leaf(&o.key), "object", NodeIcon::File).detail(o.size.map(human).unwrap_or_default())),
+        );
         if r.next_continuation_token.is_some() {
             out.push(Node::new(format!("{id}#more"), "First 1,000 shown; open the folder to page", "info", NodeIcon::Info));
         }
@@ -254,7 +320,13 @@ impl ResourceSession for S3Session {
                 // Listing table with a name filter (prefix within this folder).
                 let prefix = format!("{key}{}", opts.filter.trim());
                 let r = self.list(bucket, &prefix, None, (opts.limit as usize).clamp(1, 1000)).await?;
-                let mut rs = ResultSet::new(vec![ColumnMeta::new("name", "text"), ColumnMeta::new("size", "int8"), ColumnMeta::new("last_modified", "text"), ColumnMeta::new("storage_class", "text"), ColumnMeta::new("etag", "text")]);
+                let mut rs = ResultSet::new(vec![
+                    ColumnMeta::new("name", "text"),
+                    ColumnMeta::new("size", "int8"),
+                    ColumnMeta::new("last_modified", "text"),
+                    ColumnMeta::new("storage_class", "text"),
+                    ColumnMeta::new("etag", "text"),
+                ]);
                 for c in &r.common_prefixes {
                     rs.rows.push(vec![Value::Text(c.prefix[key.len()..].to_string()), Value::Null, Value::Null, Value::Text("folder".into()), Value::Null]);
                 }
@@ -277,7 +349,9 @@ impl ResourceSession for S3Session {
                 let size: u64 = h.get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(0);
                 let ctype = h.get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
                 let mut props = vec![("Key".to_string(), format!("s3://{bucket}/{key}")), ("Size".into(), format!("{} ({size} bytes)", human(size))), ("Content type".into(), ctype.clone())];
-                for (name, label) in [("last-modified", "Last modified"), ("etag", "ETag"), ("x-amz-storage-class", "Storage class"), ("x-amz-server-side-encryption", "Encryption"), ("x-amz-version-id", "Version")] {
+                for (name, label) in
+                    [("last-modified", "Last modified"), ("etag", "ETag"), ("x-amz-storage-class", "Storage class"), ("x-amz-server-side-encryption", "Encryption"), ("x-amz-version-id", "Version")]
+                {
                     if let Some(v) = h.get(name).and_then(|v| v.to_str().ok()) {
                         props.push((label.into(), v.trim_matches('"').to_string()));
                     }
@@ -285,14 +359,19 @@ impl ResourceSession for S3Session {
                 for (n, v) in h.iter().filter(|(n, _)| n.as_str().starts_with("x-amz-meta-")) {
                     props.push((n.as_str().trim_start_matches("x-amz-").to_string(), v.to_str().unwrap_or("").to_string()));
                 }
-                let textual = ctype.starts_with("text/") || ctype.contains("json") || ctype.contains("xml") || ctype.contains("yaml") || ctype.contains("csv") || [".txt", ".json", ".csv", ".log", ".md", ".yml", ".yaml", ".xml", ".sql", ".ini", ".toml"].iter().any(|e| key.ends_with(e));
+                let textual = ctype.starts_with("text/")
+                    || ctype.contains("json")
+                    || ctype.contains("xml")
+                    || ctype.contains("yaml")
+                    || ctype.contains("csv")
+                    || [".txt", ".json", ".csv", ".log", ".md", ".yml", ".yaml", ".xml", ".sql", ".ini", ".toml"].iter().any(|e| key.ends_with(e));
                 if size > 0 && size <= PREVIEW_MAX && textual {
                     let body = self.send(self.client.get(GetObject::new(&b, Some(&self.creds), key).sign(SIGN))).await?.bytes().await.map_err(|e| Error::other(e.to_string()))?;
                     let text = String::from_utf8_lossy(&body).into_owned();
-                    if ctype.contains("json") || key.ends_with(".json") {
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                            return Ok(Content::Json(serde_json::to_string_pretty(&v).unwrap_or(text)));
-                        }
+                    if (ctype.contains("json") || key.ends_with(".json"))
+                        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&text)
+                    {
+                        return Ok(Content::Json(serde_json::to_string_pretty(&v).unwrap_or(text)));
                     }
                     return Ok(Content::Text(text));
                 }
@@ -316,8 +395,16 @@ impl ResourceSession for S3Session {
         };
         match kind {
             "" => vec![ActionSpec::new("create_bucket", "New bucket…").field(FieldSpec::text("name", "Bucket name").required())],
-            "bucket" => vec![upload(), ActionSpec::new("mkdir", "New folder…").field(FieldSpec::text("name", "Folder").required()), ActionSpec::new("delete_bucket", "Delete bucket (must be empty)").destructive()],
-            "prefix" => vec![upload(), ActionSpec::new("mkdir", "New folder…").field(FieldSpec::text("name", "Folder").required()), ActionSpec::new("delete_prefix", "Delete folder and contents").destructive()],
+            "bucket" => vec![
+                upload(),
+                ActionSpec::new("mkdir", "New folder…").field(FieldSpec::text("name", "Folder").required()),
+                ActionSpec::new("delete_bucket", "Delete bucket (must be empty)").destructive(),
+            ],
+            "prefix" => vec![
+                upload(),
+                ActionSpec::new("mkdir", "New folder…").field(FieldSpec::text("name", "Folder").required()),
+                ActionSpec::new("delete_prefix", "Delete folder and contents").destructive(),
+            ],
             "object" => vec![
                 ActionSpec::new("download", "Download…").primary().field(FieldSpec::text("file", "Save as").kind(FieldKind::File { save: true, filters: &[] }).required()),
                 ActionSpec::new("presign", "Share link…").field(FieldSpec::text("hours", "Valid for (hours)").kind(FieldKind::Number).default("1")),

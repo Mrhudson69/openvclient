@@ -64,15 +64,13 @@ impl Value {
 
     /// Ordering used by client-side sorting of a result grid.
     pub fn cmp_for_sort(&self, other: &Value) -> std::cmp::Ordering {
-        use std::cmp::Ordering::*;
         use Value::*;
+        use std::cmp::Ordering::*;
         match (self, other) {
             (Null, Null) => Equal,
             (Null, _) => Less,
             (_, Null) => Greater,
-            (a, b) if a.is_numeric() && b.is_numeric() => {
-                a.as_f64().partial_cmp(&b.as_f64()).unwrap_or(Equal)
-            }
+            (a, b) if a.is_numeric() && b.is_numeric() => a.as_f64().partial_cmp(&b.as_f64()).unwrap_or(Equal),
             (Text(a), Text(b)) => match (a.parse::<f64>(), b.parse::<f64>()) {
                 (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(Equal),
                 _ => a.cmp(b),
@@ -160,10 +158,7 @@ impl ResultSet {
     pub fn from_text_rows(columns: &[&str], rows: Vec<Vec<Option<String>>>) -> Self {
         Self {
             columns: columns.iter().map(|c| ColumnMeta::new(*c, "")).collect(),
-            rows: rows
-                .into_iter()
-                .map(|r| r.into_iter().map(|v| v.map(Value::Text).unwrap_or(Value::Null)).collect())
-                .collect(),
+            rows: rows.into_iter().map(|r| r.into_iter().map(|v| v.map(Value::Text).unwrap_or(Value::Null)).collect()).collect(),
             truncated: false,
         }
     }

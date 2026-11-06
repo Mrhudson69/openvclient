@@ -261,9 +261,5 @@ pub fn primary_button(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Respo
 /// Destructive button; always behind a confirmation in the caller.
 pub fn danger_button(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
     let t = tokens(ui);
-    ui.add(egui::Button::new(egui::RichText::new(text.into()).color(Color32::WHITE).strong()).fill(if ui.visuals().dark_mode {
-        Color32::from_rgb(0xb9, 0x1c, 0x1c)
-    } else {
-        t.destructive
-    }))
+    ui.add(egui::Button::new(egui::RichText::new(text.into()).color(Color32::WHITE).strong()).fill(if ui.visuals().dark_mode { Color32::from_rgb(0xb9, 0x1c, 0x1c) } else { t.destructive }))
 }

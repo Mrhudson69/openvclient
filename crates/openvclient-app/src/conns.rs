@@ -79,10 +79,7 @@ impl Connections {
 
     /// Does this profile need a password typed before connecting?
     pub fn needs_prompt(&self, p: &ConnectionProfile) -> bool {
-        let has_secret_field = self
-            .registry
-            .get(&p.driver)
-            .is_some_and(|d| d.info().fields.iter().any(|f| f.kind == openvclient_core::FieldKind::Secret));
+        let has_secret_field = self.registry.get(&p.driver).is_some_and(|d| d.info().fields.iter().any(|f| f.kind == openvclient_core::FieldKind::Secret));
         has_secret_field && !p.save_secret && !self.session_secrets.contains_key(&p.id)
     }
 
@@ -156,9 +153,10 @@ impl Connections {
                 ConnState::Connecting { job, .. } => match job.take() {
                     Some(Ok((handle, tunnel))) => {
                         // Tunnel host key, or the SSH connector's own server key.
-                        let fp = tunnel.as_ref().and_then(|t| t.fingerprint.clone()).or_else(|| {
-                            handle.base().server_info().details.iter().find(|(k, _)| k == "Host key (SHA256)").map(|(_, v)| v.clone()).filter(|v| !v.is_empty())
-                        });
+                        let fp = tunnel
+                            .as_ref()
+                            .and_then(|t| t.fingerprint.clone())
+                            .or_else(|| handle.base().server_info().details.iter().find(|(k, _)| k == "Host key (SHA256)").map(|(_, v)| v.clone()).filter(|v| !v.is_empty()));
                         *st = ConnState::Connected(Live { handle, tunnel: tunnel.map(std::sync::Arc::new), latency: None, last_ping: now - PING_EVERY, ping: None, degraded: false });
                         events.push(ConnEvent::Connected(*id, fp));
                     }

@@ -13,10 +13,7 @@ use futures::TryStreamExt;
 use openvclient_core::explain::{ExplainResult, PlanNode};
 use openvclient_core::sql::*;
 use openvclient_core::sqltext::{Dialect, leading_keyword, split_statements};
-use openvclient_core::{
-    Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, ErrorKind, FieldKind, FieldSpec, Result, ResultSet,
-    ServerInfo, ServiceSession, SessionHandle, Value,
-};
+use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, ErrorKind, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 use parking_lot::Mutex;
 use tiberius::{AuthMethod, Client, ColumnData, Config, EncryptionLevel, QueryItem};
 use tokio::net::TcpStream;
@@ -55,24 +52,21 @@ impl Default for SqlServerDriver {
                 .advanced(),
         );
         fields.push(FieldSpec::text("connect_timeout", "Connect timeout (s)").kind(FieldKind::Number).default("15").advanced());
-        Self {
-            info: DriverInfo {
-                id: "sqlserver",
-                name: "SQL Server",
-                category: Category::Relational,
-                description: "Microsoft SQL Server 2012+ and Azure SQL (SQL logins)",
-                badge: "MS",
-                fields,
-            },
-        }
+        Self { info: DriverInfo { id: "sqlserver", name: "SQL Server", category: Category::Relational, description: "Microsoft SQL Server 2012+ and Azure SQL (SQL logins)", badge: "MS", fields } }
     }
 }
 
 #[derive(Clone)]
 enum Auth {
-    Sql { user: String, password: String },
+    Sql {
+        user: String,
+        password: String,
+    },
     #[cfg_attr(not(windows), allow(dead_code))]
-    Windows { user: String, password: String },
+    Windows {
+        user: String,
+        password: String,
+    },
     Integrated,
     Entra(aad::Flow),
     Token(String),
@@ -237,9 +231,7 @@ pub(crate) fn to_value(d: &ColumnData<'static>) -> Value {
         ColumnData::Binary(v) => v.as_ref().map(|b| Value::Bytes(b.to_vec())).unwrap_or(Value::Null),
         ColumnData::Numeric(v) => s(v.map(|n| n.to_string())),
         ColumnData::Xml(v) => s(v.as_ref().map(|x| x.to_string())),
-        ColumnData::DateTime(_) | ColumnData::SmallDateTime(_) | ColumnData::DateTime2(_) => {
-            s(NaiveDateTime::from_sql(d).ok().flatten().map(|t| t.format("%Y-%m-%d %H:%M:%S%.f").to_string()))
-        }
+        ColumnData::DateTime(_) | ColumnData::SmallDateTime(_) | ColumnData::DateTime2(_) => s(NaiveDateTime::from_sql(d).ok().flatten().map(|t| t.format("%Y-%m-%d %H:%M:%S%.f").to_string())),
         ColumnData::Date(_) => s(NaiveDate::from_sql(d).ok().flatten().map(|t| t.format("%Y-%m-%d").to_string())),
         ColumnData::Time(_) => s(NaiveTime::from_sql(d).ok().flatten().map(|t| t.format("%H:%M:%S%.f").to_string())),
         ColumnData::DateTimeOffset(_) => s(DateTime::<FixedOffset>::from_sql(d).ok().flatten().map(|t| t.format("%Y-%m-%d %H:%M:%S%.f %:z").to_string())),
@@ -703,11 +695,7 @@ impl SqlSession for MsSession {
             lit = D.quote_literal(&spec.principal)
         );
         let privs = spec.privileges.join(", ");
-        let stmt = if revoke {
-            format!("REVOKE {privs}{on} FROM {user}")
-        } else {
-            format!("GRANT {privs}{on} TO {user}{}", if spec.with_grant_option { " WITH GRANT OPTION" } else { "" })
-        };
+        let stmt = if revoke { format!("REVOKE {privs}{on} FROM {user}") } else { format!("GRANT {privs}{on} TO {user}{}", if spec.with_grant_option { " WITH GRANT OPTION" } else { "" }) };
         self.run_on(db.as_deref(), &format!("{ensure}\n{stmt}")).await.map(|_| ())
     }
 
@@ -754,15 +742,15 @@ struct MsConsole {
 
 impl MsConsole {
     async fn ensure(&self, slot: &mut Option<Conn>) -> Result<()> {
-        if self.suspect.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            if let Some(c) = slot.as_mut() {
-                let alive = match c.simple_query("SELECT 1").await {
-                    Ok(st) => st.into_results().await.is_ok(),
-                    Err(_) => false,
-                };
-                if !alive {
-                    *slot = None;
-                }
+        if self.suspect.swap(false, std::sync::atomic::Ordering::Relaxed)
+            && let Some(c) = slot.as_mut()
+        {
+            let alive = match c.simple_query("SELECT 1").await {
+                Ok(st) => st.into_results().await.is_ok(),
+                Err(_) => false,
+            };
+            if !alive {
+                *slot = None;
             }
         }
         if slot.is_none() {
@@ -779,17 +767,17 @@ impl MsConsole {
 #[async_trait]
 impl SqlConsole for MsConsole {
     async fn execute(&self, statements: Vec<String>, opts: ExecOptions) -> Vec<StatementResult> {
-        if self.target.read_only {
-            if let Some((i, word)) = statements.iter().enumerate().find_map(|(i, s)| writes(s).map(|w| (i, w))) {
-                let mut out: Vec<StatementResult> = Vec::new();
-                for (j, sql) in statements.into_iter().enumerate() {
-                    if j == i {
-                        out.push(StatementResult { sql, outcome: Err(Error::invalid(format!("{word} is blocked on a read-only connection"))), elapsed: Duration::ZERO });
-                        break;
-                    }
+        if self.target.read_only
+            && let Some((i, word)) = statements.iter().enumerate().find_map(|(i, s)| writes(s).map(|w| (i, w)))
+        {
+            let mut out: Vec<StatementResult> = Vec::new();
+            for (j, sql) in statements.into_iter().enumerate() {
+                if j == i {
+                    out.push(StatementResult { sql, outcome: Err(Error::invalid(format!("{word} is blocked on a read-only connection"))), elapsed: Duration::ZERO });
+                    break;
                 }
-                return out;
             }
+            return out;
         }
         let mut slot = self.conn.lock().await;
         let mut out = Vec::new();
@@ -807,12 +795,12 @@ impl SqlConsole for MsConsole {
                         return Err(Error::cancelled().with_detail("The session ended (cancel on SQL Server uses KILL). A new session opens on the next run."));
                     }
                 }
-                if r.is_ok() && leading_keyword(&sql) == "USE" {
-                    if let Ok(rows) = text_rows(slot.as_mut().unwrap(), "SELECT DB_NAME()", &[]).await {
-                        if let Some(db) = rows.first().and_then(|r| r[0].clone()) {
-                            *self.database.lock() = db;
-                        }
-                    }
+                if r.is_ok()
+                    && leading_keyword(&sql) == "USE"
+                    && let Ok(rows) = text_rows(slot.as_mut().unwrap(), "SELECT DB_NAME()", &[]).await
+                    && let Some(db) = rows.first().and_then(|r| r[0].clone())
+                {
+                    *self.database.lock() = db;
                 }
                 r
             }
@@ -843,10 +831,8 @@ impl SqlConsole for MsConsole {
         if let Ok(s) = c.simple_query(off).await {
             let _ = s.into_results().await;
         }
-        if wrap {
-            if let Ok(s) = c.simple_query("IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION").await {
-                let _ = s.into_results().await;
-            }
+        if wrap && let Ok(s) = c.simple_query("IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION").await {
+            let _ = s.into_results().await;
         }
         let sets = sets?;
         // The plan rows are the result set containing a StmtText column.
@@ -868,15 +854,11 @@ impl SqlConsole for MsConsole {
                 }
             }
             let title = col(r, "PhysicalOp").and_then(|v| v.to_text()).filter(|v| !v.is_empty()).unwrap_or_else(|| text.trim().chars().take(80).collect());
-            nodes.push((id, parent, PlanNode {
-                title,
-                total_cost: num("TotalSubtreeCost"),
-                plan_rows: num("EstimateRows"),
-                actual_rows: num("Rows"),
-                loops: num("Executes"),
-                props,
-                ..Default::default()
-            }));
+            nodes.push((
+                id,
+                parent,
+                PlanNode { title, total_cost: num("TotalSubtreeCost"), plan_rows: num("EstimateRows"), actual_rows: num("Rows"), loops: num("Executes"), props, ..Default::default() },
+            ));
         }
         fn build(parent: i64, nodes: &[(i64, i64, PlanNode)], depth: usize) -> Vec<PlanNode> {
             if depth > 64 {
@@ -898,10 +880,10 @@ impl SqlConsole for MsConsole {
         let spid = self.spid.lock().clone();
         let target = self.target.clone();
         self.rt.spawn(async move {
-            if let Ok(n) = spid.parse::<i32>() {
-                if let Ok(mut c) = target.connect("master").await {
-                    let _ = c.simple_query(format!("KILL {n}")).await;
-                }
+            if let Ok(n) = spid.parse::<i32>()
+                && let Ok(mut c) = target.connect("master").await
+            {
+                let _ = c.simple_query(format!("KILL {n}")).await;
             }
         });
     }
@@ -922,8 +904,34 @@ mod tests;
 /// comments. Read-only connections refuse such statements.
 fn writes(sql: &str) -> Option<String> {
     const WRITE: &[&str] = &[
-        "INSERT", "UPDATE", "DELETE", "MERGE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE", "DENY", "EXEC", "EXECUTE", "BACKUP", "RESTORE", "DBCC", "BULK", "INTO", "KILL",
-        "SHUTDOWN", "RECONFIGURE", "OPENROWSET", "OPENQUERY", "OPENDATASOURCE", "WRITETEXT", "UPDATETEXT", "SP_EXECUTESQL", "XP_CMDSHELL",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "MERGE",
+        "DROP",
+        "ALTER",
+        "CREATE",
+        "TRUNCATE",
+        "GRANT",
+        "REVOKE",
+        "DENY",
+        "EXEC",
+        "EXECUTE",
+        "BACKUP",
+        "RESTORE",
+        "DBCC",
+        "BULK",
+        "INTO",
+        "KILL",
+        "SHUTDOWN",
+        "RECONFIGURE",
+        "OPENROWSET",
+        "OPENQUERY",
+        "OPENDATASOURCE",
+        "WRITETEXT",
+        "UPDATETEXT",
+        "SP_EXECUTESQL",
+        "XP_CMDSHELL",
     ];
     use openvclient_core::sqltext::{Dialect, TokenKind, tokenize};
     tokenize(Dialect::SqlServer, sql).into_iter().filter(|(k, _)| matches!(k, TokenKind::Keyword | TokenKind::Ident)).find_map(|(_, sp)| {

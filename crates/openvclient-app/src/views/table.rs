@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use egui::{Key, Modifiers, RichText};
 use egui_material_icons::icons::*;
 use openvclient_core::sql::{ColumnInfo, ObjPath, ObjectKind, RowChange, RowKey, SortDir, TablePage, TableQuery};
-use openvclient_core::{ResultSet, Result, Value};
+use openvclient_core::{Result, ResultSet, Value};
 use uuid::Uuid;
 
 use crate::app::AppCtx;
@@ -147,21 +147,23 @@ impl TableTab {
         ui.add_space(theme::space::XS);
         match self.view {
             View::Structure => {
-                if self.columns.is_none() && self.columns_job.is_none() {
-                    if let Some(s) = cx.conns.session(self.conn).and_then(|h| h.sql()).cloned() {
-                        let p = self.path.clone();
-                        self.columns_job = Some(cx.bg.spawn("", async move { s.columns(&p).await }));
-                    }
+                if self.columns.is_none()
+                    && self.columns_job.is_none()
+                    && let Some(s) = cx.conns.session(self.conn).and_then(|h| h.sql()).cloned()
+                {
+                    let p = self.path.clone();
+                    self.columns_job = Some(cx.bg.spawn("", async move { s.columns(&p).await }));
                 }
                 structure_ui(ui, &self.columns, tab_id);
                 return;
             }
             View::Ddl => {
-                if self.ddl.is_none() && self.ddl_job.is_none() {
-                    if let Some(s) = cx.conns.session(self.conn).and_then(|h| h.sql()).cloned() {
-                        let (k, p) = (self.kind, self.path.clone());
-                        self.ddl_job = Some(cx.bg.spawn("", async move { s.ddl(k, &p).await }));
-                    }
+                if self.ddl.is_none()
+                    && self.ddl_job.is_none()
+                    && let Some(s) = cx.conns.session(self.conn).and_then(|h| h.sql()).cloned()
+                {
+                    let (k, p) = (self.kind, self.path.clone());
+                    self.ddl_job = Some(cx.bg.spawn("", async move { s.ddl(k, &p).await }));
                 }
                 crate::views::object::ddl_ui(ui, cx, self.conn, &self.ddl, self.ddl_job.is_some(), self.path.database.clone());
                 return;
@@ -173,7 +175,12 @@ impl TableTab {
         let mut apply = refresh;
         ui.horizontal(|ui| {
             ui.label(RichText::new("WHERE").monospace().strong().color(t.muted_fg));
-            let r = ui.add(egui::TextEdit::singleline(&mut self.filter).font(egui::TextStyle::Monospace).hint_text("e.g. status = 'active' AND created_at > now() - interval '1 day'").desired_width(ui.available_width() - 210.0));
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut self.filter)
+                    .font(egui::TextStyle::Monospace)
+                    .hint_text("e.g. status = 'active' AND created_at > now() - interval '1 day'")
+                    .desired_width(ui.available_width() - 210.0),
+            );
             if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 apply = true;
             }
@@ -268,16 +275,16 @@ impl TableTab {
         // Pending changes bar.
         if editable {
             ui.horizontal(|ui| {
-                if ui.button(ico(ICON_ADD, "Add row")).clicked() {
-                    if let Some(Ok(p)) = &mut self.page {
-                        let n = p.rows.columns.len();
-                        p.rows.rows.push(vec![Value::Null; n]);
-                        if let Some(ids) = &mut p.row_ids {
-                            ids.push(String::new());
-                        }
-                        self.inserted += 1;
-                        self.generation += 1;
+                if ui.button(ico(ICON_ADD, "Add row")).clicked()
+                    && let Some(Ok(p)) = &mut self.page
+                {
+                    let n = p.rows.columns.len();
+                    p.rows.rows.push(vec![Value::Null; n]);
+                    if let Some(ids) = &mut p.row_ids {
+                        ids.push(String::new());
                     }
+                    self.inserted += 1;
+                    self.generation += 1;
                 }
                 let sel = self.grid.selected_rows_sorted();
                 if ui.add_enabled(!sel.is_empty(), egui::Button::new(ico(ICON_DELETE, &format!("Delete {}", sel.len())))).on_hover_text("Mark selected rows for deletion").clicked() {
@@ -405,8 +412,7 @@ impl TableTab {
         rows.dedup();
         for r in rows {
             let Some(key) = Self::row_key(p, r) else { continue };
-            let mut values: Vec<(String, Option<String>)> =
-                self.edits.iter().filter(|((er, _), _)| *er == r).map(|((_, c), v)| (p.rows.columns[*c].name.clone(), v.clone())).collect();
+            let mut values: Vec<(String, Option<String>)> = self.edits.iter().filter(|((er, _), _)| *er == r).map(|((_, c), v)| (p.rows.columns[*c].name.clone(), v.clone())).collect();
             values.sort();
             changes.push(RowChange::Update { key, values });
         }
@@ -445,19 +451,23 @@ impl TableTab {
             return;
         }
         let header: Vec<String> = data.header.iter().map(|h| cols.iter().find(|c| c.eq_ignore_ascii_case(h)).cloned().unwrap_or_default()).collect();
-        let changes: Vec<RowChange> = data
-            .rows
-            .into_iter()
-            .map(|r| RowChange::Insert { values: header.iter().cloned().zip(r.into_iter().map(|v| if v.is_empty() { None } else { Some(v) })).collect() })
-            .collect();
+        let changes: Vec<RowChange> =
+            data.rows.into_iter().map(|r| RowChange::Insert { values: header.iter().cloned().zip(r.into_iter().map(|v| if v.is_empty() { None } else { Some(v) })).collect() }).collect();
         let n = changes.len();
         let Some(s) = cx.conns.session(self.conn).and_then(|h| h.sql()).cloned() else { return };
         let target = self.path.clone();
         let file = path.display().to_string();
-        cx.confirm(Some(self.conn), format!("Import {n} rows?"), format!("Rows from {file} are inserted into {} in one transaction. Empty cells become NULL.", self.path.display()), "Import", None, move |cx| {
-            let job = cx.bg.spawn(format!("Importing {n} rows"), async move { s.apply_changes(&target, changes).await.map(|n| format!("{n} rows inserted")) });
-            cx.dialog = Some(crate::views::dialogs::Dialog::Tracked { job, done: "Import finished".into(), conn: None });
-        });
+        cx.confirm(
+            Some(self.conn),
+            format!("Import {n} rows?"),
+            format!("Rows from {file} are inserted into {} in one transaction. Empty cells become NULL.", self.path.display()),
+            "Import",
+            None,
+            move |cx| {
+                let job = cx.bg.spawn(format!("Importing {n} rows"), async move { s.apply_changes(&target, changes).await.map(|n| format!("{n} rows inserted")) });
+                cx.dialog = Some(crate::views::dialogs::Dialog::Tracked { job, done: "Import finished".into(), conn: None });
+            },
+        );
     }
 }
 

@@ -28,12 +28,15 @@ async fn live_postgres() {
     admin.create_database(CreateDatabaseSpec { name: "openvclient_test".into(), ..Default::default() }).await.unwrap();
 
     let s = PostgresDriver::default().connect(params("openvclient_test")).await.unwrap().sql().unwrap().clone();
-    s.run(None, "CREATE SCHEMA app; CREATE TABLE app.users(id serial PRIMARY KEY, name text NOT NULL, score numeric(6,2), tags text[], born date); \
+    s.run(
+        None,
+        "CREATE SCHEMA app; CREATE TABLE app.users(id serial PRIMARY KEY, name text NOT NULL, score numeric(6,2), tags text[], born date); \
                  CREATE TABLE app.log(msg text); CREATE VIEW app.v AS SELECT name FROM app.users; \
                  CREATE INDEX users_name_idx ON app.users(name); COMMENT ON TABLE app.users IS 'people'; \
-                 CREATE FUNCTION app.add(a int, b int) RETURNS int LANGUAGE sql AS $$ SELECT a + b $$;")
-        .await
-        .unwrap();
+                 CREATE FUNCTION app.add(a int, b int) RETURNS int LANGUAGE sql AS $$ SELECT a + b $$;",
+    )
+    .await
+    .unwrap();
 
     let dbs = s.children(None).await.unwrap();
     assert!(dbs.iter().any(|d| d.label == "openvclient_test"));
@@ -92,10 +95,7 @@ async fn live_postgres() {
     assert_eq!(s.count_rows(&users, None).await.unwrap(), 2, "EXPLAIN ANALYZE must not delete rows");
 
     // Table page with server-side filter/sort and editing by primary key.
-    let page = s
-        .table_page(TableQuery { path: users.clone(), filter: Some("name <> 'zed'".into()), order_by: vec![("name".into(), SortDir::Desc)], limit: 50, offset: 0 })
-        .await
-        .unwrap();
+    let page = s.table_page(TableQuery { path: users.clone(), filter: Some("name <> 'zed'".into()), order_by: vec![("name".into(), SortDir::Desc)], limit: 50, offset: 0 }).await.unwrap();
     assert_eq!(page.key_columns, vec!["id"]);
     assert_eq!(page.rows.rows[0][1], Value::Text("bob".into()));
     assert!(page.read_only_reason.is_none());
@@ -103,7 +103,10 @@ async fn live_postgres() {
     s.apply_changes(
         &users,
         vec![
-            RowChange::Update { key: RowKey::PrimaryKey(vec![("id".into(), bob_id.clone())]), values: vec![("score".into(), Some("7.25".into())), ("tags".into(), Some("{x}".into())), ("born".into(), Some("1999-12-31".into()))] },
+            RowChange::Update {
+                key: RowKey::PrimaryKey(vec![("id".into(), bob_id.clone())]),
+                values: vec![("score".into(), Some("7.25".into())), ("tags".into(), Some("{x}".into())), ("born".into(), Some("1999-12-31".into()))],
+            },
             RowChange::Insert { values: vec![("name".into(), Some("cy".into()))] },
         ],
     )
@@ -114,9 +117,7 @@ async fn live_postgres() {
     assert!(s.table_page(TableQuery { path: users.clone(), filter: Some("true; DROP TABLE app.users".into()), order_by: vec![], limit: 5, offset: 0 }).await.is_err());
 
     // Failed batch rolls back everything.
-    let bad = s
-        .apply_changes(&users, vec![RowChange::Insert { values: vec![("name".into(), Some("ok".into()))] }, RowChange::Insert { values: vec![("name".into(), None)] }])
-        .await;
+    let bad = s.apply_changes(&users, vec![RowChange::Insert { values: vec![("name".into(), Some("ok".into()))] }, RowChange::Insert { values: vec![("name".into(), None)] }]).await;
     assert!(bad.is_err());
     assert_eq!(s.count_rows(&users, None).await.unwrap(), 3);
 
@@ -138,10 +139,14 @@ async fn live_postgres() {
     assert!(s.metrics().await.unwrap().iter().any(|m| m.name == "Cache hit ratio (%)"));
     let _ = s.drop_principal("openvclient_test_role", None).await;
     s.create_principal(PrincipalSpec { name: "openvclient_test_role".into(), password: Some("pw'x".into()), can_login: true, ..Default::default() }).await.unwrap();
-    s.grant(GrantSpec { privileges: vec!["SELECT".into()], target: GrantTarget::Table(users.clone()), principal: "openvclient_test_role".into(), host: None, with_grant_option: false }, false).await.unwrap();
+    s.grant(GrantSpec { privileges: vec!["SELECT".into()], target: GrantTarget::Table(users.clone()), principal: "openvclient_test_role".into(), host: None, with_grant_option: false }, false)
+        .await
+        .unwrap();
     let privs = s.privileges("openvclient_test_role", None).await.unwrap();
     assert!(privs.rows.iter().any(|r| r[1] == Value::Text("app.users".into())));
-    s.grant(GrantSpec { privileges: vec!["SELECT".into()], target: GrantTarget::Table(users.clone()), principal: "openvclient_test_role".into(), host: None, with_grant_option: false }, true).await.unwrap();
+    s.grant(GrantSpec { privileges: vec!["SELECT".into()], target: GrantTarget::Table(users.clone()), principal: "openvclient_test_role".into(), host: None, with_grant_option: false }, true)
+        .await
+        .unwrap();
     s.drop_principal("openvclient_test_role", None).await.unwrap();
     let cat = s.catalog(None).await.unwrap();
     assert!(cat.columns["users"].contains(&"score".to_string()));

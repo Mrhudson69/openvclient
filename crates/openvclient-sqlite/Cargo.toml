@@ -14,3 +14,6 @@ rusqlite = { version = "0.41", features = ["bundled", "backup", "column_decltype
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

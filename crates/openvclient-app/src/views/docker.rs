@@ -256,9 +256,16 @@ impl DockerTab {
                                     ui.label(RichText::new(&v.mountpoint).small().color(t.muted_fg));
                                     if ui.small_button(RichText::new("Remove…").color(t.destructive)).clicked() {
                                         let (sess, n) = (s.clone(), v.name.clone());
-                                        cx.confirm(Some(self.conn), format!("Remove volume {n}?"), "Its data is deleted permanently. Fails while a container uses it.", "Remove", Some(n.clone()), move |cx| {
-                                            crate::views::dialogs::track(cx, format!("Removing volume {n}"), "Volume removed", None, async move { sess.remove_volume(&n).await });
-                                        });
+                                        cx.confirm(
+                                            Some(self.conn),
+                                            format!("Remove volume {n}?"),
+                                            "Its data is deleted permanently. Fails while a container uses it.",
+                                            "Remove",
+                                            Some(n.clone()),
+                                            move |cx| {
+                                                crate::views::dialogs::track(cx, format!("Removing volume {n}"), "Volume removed", None, async move { sess.remove_volume(&n).await });
+                                            },
+                                        );
                                     }
                                     ui.end_row();
                                 }
@@ -328,10 +335,8 @@ impl DockerTab {
             None => Vec::new(),
         };
         let f = self.filter.to_lowercase();
-        let list: Vec<ContainerInfo> = list
-            .into_iter()
-            .filter(|c| f.is_empty() || c.name.to_lowercase().contains(&f) || c.image.to_lowercase().contains(&f) || c.compose_project.as_deref().unwrap_or("").contains(&f))
-            .collect();
+        let list: Vec<ContainerInfo> =
+            list.into_iter().filter(|c| f.is_empty() || c.name.to_lowercase().contains(&f) || c.image.to_lowercase().contains(&f) || c.compose_project.as_deref().unwrap_or("").contains(&f)).collect();
         let avail = ui.available_height();
         egui::Panel::top(egui::Id::unique(("ctr_list", tab_id))).resizable(true).default_size((avail * 0.45).max(140.0)).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -387,21 +392,23 @@ impl DockerTab {
                             } else {
                                 act(ui, ICON_PLAY_ARROW, "Start", ContainerAction::Start, self);
                             }
-                            if ui.small_button(RichText::new(String::from(ICON_DELETE)).color(t.destructive)).on_hover_text("Remove…").clicked() {
-                                if let Some(s) = self.session(cx) {
-                                    let (id, name) = (c.id.clone(), c.name.clone());
-                                    let force = running;
-                                    cx.confirm(
-                                        Some(self.conn),
-                                        format!("Remove container {name}?"),
-                                        if force { "It is running and will be killed first. Its writable layer is deleted." } else { "Its writable layer is deleted. Named volumes are kept." },
-                                        "Remove",
-                                        Some(name.clone()),
-                                        move |cx| {
-                                            crate::views::dialogs::track(cx, format!("Removing {name}"), "Container removed", None, async move { s.container_action(&id, ContainerAction::Remove { force }).await });
-                                        },
-                                    );
-                                }
+                            if ui.small_button(RichText::new(String::from(ICON_DELETE)).color(t.destructive)).on_hover_text("Remove…").clicked()
+                                && let Some(s) = self.session(cx)
+                            {
+                                let (id, name) = (c.id.clone(), c.name.clone());
+                                let force = running;
+                                cx.confirm(
+                                    Some(self.conn),
+                                    format!("Remove container {name}?"),
+                                    if force { "It is running and will be killed first. Its writable layer is deleted." } else { "Its writable layer is deleted. Named volumes are kept." },
+                                    "Remove",
+                                    Some(name.clone()),
+                                    move |cx| {
+                                        crate::views::dialogs::track(cx, format!("Removing {name}"), "Container removed", None, async move {
+                                            s.container_action(&id, ContainerAction::Remove { force }).await
+                                        });
+                                    },
+                                );
                             }
                         });
                         ui.end_row();
@@ -443,10 +450,10 @@ impl DockerTab {
                     if ui.add(egui::DragValue::new(&mut self.tail).range(10..=100_000)).changed() {
                         self.logs = None;
                     }
-                    if let Some(Ok(l)) = &self.logs {
-                        if ui.button(ico(ICON_CONTENT_COPY, "Copy")).clicked() {
-                            ui.ctx().copy_text(l.clone());
-                        }
+                    if let Some(Ok(l)) = &self.logs
+                        && ui.button(ico(ICON_CONTENT_COPY, "Copy")).clicked()
+                    {
+                        ui.ctx().copy_text(l.clone());
                     }
                 });
                 match &self.logs {
@@ -503,10 +510,10 @@ impl DockerTab {
                 }
             }
             Detail::Exec => {
-                if let Some(r) = poll(&mut self.exec_job) {
-                    if let Some(last) = self.exec_out.last_mut() {
-                        last.1 = r.map_err(|e| e.to_string());
-                    }
+                if let Some(r) = poll(&mut self.exec_job)
+                    && let Some(last) = self.exec_out.last_mut()
+                {
+                    last.1 = r.map_err(|e| e.to_string());
                 }
                 ui.label(RichText::new("Runs a command inside the container (no shell unless you call one, e.g. sh -c '…').").small().color(t.muted_fg));
                 let h = ui.available_height() - 40.0;

@@ -69,11 +69,9 @@ pub async fn children(s: &MsSession, node: Option<(ObjectKind, ObjPath)>) -> Res
             let rows = text_rows(&mut c, "SELECT name FROM sys.schemas WHERE name NOT IN ('guest','INFORMATION_SCHEMA','sys') AND name NOT LIKE 'db[_]%' ORDER BY name", &[]).await?;
             Ok(rows.into_iter().filter_map(|r| r[0].clone()).map(|n| TreeNode::new(ObjectKind::Schema, n.clone(), ObjPath::db(&db).with_schema(n)).leaf()).collect())
         }
-        ObjectKind::Folder(FolderKind::Programmability) => Ok(vec![
-            TreeNode::folder(FolderKind::Procedures, ObjPath::db(&db)),
-            TreeNode::folder(FolderKind::Functions, ObjPath::db(&db)),
-            TreeNode::folder(FolderKind::Sequences, ObjPath::db(&db)),
-        ]),
+        ObjectKind::Folder(FolderKind::Programmability) => {
+            Ok(vec![TreeNode::folder(FolderKind::Procedures, ObjPath::db(&db)), TreeNode::folder(FolderKind::Functions, ObjPath::db(&db)), TreeNode::folder(FolderKind::Sequences, ObjPath::db(&db))])
+        }
         ObjectKind::Folder(f @ (FolderKind::Tables | FolderKind::Views | FolderKind::Procedures | FolderKind::Functions | FolderKind::Sequences)) => {
             let (types, okind, leaf) = match f {
                 FolderKind::Tables => ("'U'", ObjectKind::Table, false),
@@ -150,7 +148,13 @@ pub async fn children(s: &MsSession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 .into_iter()
                 .map(|r| {
                     let name = r[0].clone().unwrap_or_default();
-                    let kind_s = if r[3].as_deref() == Some("1") { "primary key".to_string() } else if r[2].as_deref() == Some("1") { "unique".to_string() } else { String::new() };
+                    let kind_s = if r[3].as_deref() == Some("1") {
+                        "primary key".to_string()
+                    } else if r[2].as_deref() == Some("1") {
+                        "unique".to_string()
+                    } else {
+                        String::new()
+                    };
                     let d = [kind_s, r[1].clone().unwrap_or_default().to_lowercase(), format!("({})", r[4].clone().unwrap_or_default())]
                         .into_iter()
                         .filter(|x| !x.is_empty())
@@ -163,12 +167,8 @@ pub async fn children(s: &MsSession, node: Option<(ObjectKind, ObjPath)>) -> Res
         ObjectKind::Folder(FolderKind::Constraints) => {
             let mut c = s.conn(Some(&db)).await?;
             let obj = D.qualified(path.schema.as_deref(), path.name()?);
-            let rows = text_rows(
-                &mut c,
-                "SELECT name, type_desc FROM sys.objects WHERE parent_object_id = OBJECT_ID(@P1) AND type IN ('PK','UQ','F','C','D') ORDER BY type, name",
-                &[&obj.as_str()],
-            )
-            .await?;
+            let rows =
+                text_rows(&mut c, "SELECT name, type_desc FROM sys.objects WHERE parent_object_id = OBJECT_ID(@P1) AND type IN ('PK','UQ','F','C','D') ORDER BY type, name", &[&obj.as_str()]).await?;
             Ok(rows
                 .into_iter()
                 .map(|r| {
@@ -180,7 +180,8 @@ pub async fn children(s: &MsSession, node: Option<(ObjectKind, ObjPath)>) -> Res
         ObjectKind::Folder(FolderKind::Triggers) => {
             let mut c = s.conn(Some(&db)).await?;
             let obj = D.qualified(path.schema.as_deref(), path.name()?);
-            let rows = text_rows(&mut c, "SELECT name, CASE WHEN is_disabled = 1 THEN 'disabled' ELSE '' END FROM sys.triggers WHERE parent_id = OBJECT_ID(@P1) ORDER BY name", &[&obj.as_str()]).await?;
+            let rows =
+                text_rows(&mut c, "SELECT name, CASE WHEN is_disabled = 1 THEN 'disabled' ELSE '' END FROM sys.triggers WHERE parent_id = OBJECT_ID(@P1) ORDER BY name", &[&obj.as_str()]).await?;
             Ok(rows
                 .into_iter()
                 .map(|r| {
@@ -241,7 +242,11 @@ pub async fn ddl(s: &MsSession, kind: ObjectKind, path: &ObjPath) -> Result<Stri
             let obj = D.qualified(path.schema.as_deref().or(Some("dbo")), &name);
             let mut c = s.conn(Some(&db)).await?;
             let rows = text_rows(&mut c, "SELECT OBJECT_DEFINITION(OBJECT_ID(@P1))", &[&obj.as_str()]).await?;
-            rows.into_iter().next().and_then(|r| r.into_iter().next().flatten()).map(|d| format!("{}\nGO\n", d.trim())).ok_or_else(|| Error::invalid("Definition not available (encrypted or insufficient permission)"))
+            rows.into_iter()
+                .next()
+                .and_then(|r| r.into_iter().next().flatten())
+                .map(|d| format!("{}\nGO\n", d.trim()))
+                .ok_or_else(|| Error::invalid("Definition not available (encrypted or insufficient permission)"))
         }
         ObjectKind::Table => {
             let cols = columns(s, path).await?;
@@ -284,7 +289,7 @@ pub async fn ddl(s: &MsSession, kind: ObjectKind, path: &ObjPath) -> Result<Stri
                 out.push_str(&format!(
                     "CREATE {}{} INDEX {} ON {target} ({});\n",
                     if r[1].as_deref() == Some("1") { "UNIQUE " } else { "" },
-                    r[2].clone().unwrap_or_default().replace("NONCLUSTERED", "NONCLUSTERED").split(' ').next().unwrap_or(""),
+                    r[2].clone().unwrap_or_default().split(' ').next().unwrap_or(""),
                     D.quote_ident(r[0].as_deref().unwrap_or_default()),
                     r[3].clone().unwrap_or_default()
                 ));
@@ -311,7 +316,12 @@ pub async fn ddl(s: &MsSession, kind: ObjectKind, path: &ObjPath) -> Result<Stri
         ObjectKind::Sequence => {
             let mut c = s.conn(Some(&db)).await?;
             let obj = D.qualified(path.schema.as_deref().or(Some("dbo")), path.name()?);
-            let r = text_rows(&mut c, "SELECT TYPE_NAME(user_type_id), CAST(start_value AS varchar(40)), CAST(increment AS varchar(40)) FROM sys.sequences WHERE object_id = OBJECT_ID(@P1)", &[&obj.as_str()]).await?;
+            let r = text_rows(
+                &mut c,
+                "SELECT TYPE_NAME(user_type_id), CAST(start_value AS varchar(40)), CAST(increment AS varchar(40)) FROM sys.sequences WHERE object_id = OBJECT_ID(@P1)",
+                &[&obj.as_str()],
+            )
+            .await?;
             let r = r.into_iter().next().ok_or_else(|| Error::invalid("Sequence not found"))?;
             Ok(format!("CREATE SEQUENCE {obj} AS {} START WITH {} INCREMENT BY {};\n", r[0].clone().unwrap_or_default(), r[1].clone().unwrap_or_default(), r[2].clone().unwrap_or_default()))
         }
@@ -457,7 +467,8 @@ pub async fn catalog(s: &MsSession, database: Option<&str>) -> Result<Catalog> {
             e.push(col);
         }
     }
-    cat.functions = text_rows(&mut c, "SELECT name FROM sys.objects WHERE type IN ('P','FN','IF','TF') AND is_ms_shipped = 0", &[]).await?.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect();
+    cat.functions =
+        text_rows(&mut c, "SELECT name FROM sys.objects WHERE type IN ('P','FN','IF','TF') AND is_ms_shipped = 0", &[]).await?.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect();
     Ok(cat)
 }
 
@@ -530,4 +541,3 @@ pub async fn metrics(s: &MsSession) -> Result<Vec<Metric>> {
         Metric::new("Problems", "Top wait type", g(14)).hint("Largest cumulative wait since start"),
     ])
 }
-

@@ -3,10 +3,10 @@
 use std::time::Instant;
 
 use async_trait::async_trait;
+use openvclient_core::Result;
 use openvclient_core::explain::{ExplainResult, parse_pg_json_plan};
 use openvclient_core::sql::*;
 use openvclient_core::sqltext::leading_keyword;
-use openvclient_core::Result;
 use tokio::sync::Mutex;
 use tokio_postgres::{CancelToken, Client};
 
@@ -113,4 +113,3 @@ impl SqlConsole for PgConsole {
 
     async fn close(&self) {}
 }
-

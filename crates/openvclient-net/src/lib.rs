@@ -25,12 +25,25 @@ pub enum SshAuth {
     Password(String),
     /// Keyboard-interactive (PAM, OTP/2FA): prompts that mention a password
     /// get `password`; any other prompt gets `otp` (a one-time code).
-    KeyboardInteractive { password: String, otp: Option<String> },
-    Key { path: PathBuf, passphrase: Option<String> },
+    KeyboardInteractive {
+        password: String,
+        otp: Option<String>,
+    },
+    Key {
+        path: PathBuf,
+        passphrase: Option<String>,
+    },
     /// Private key pasted as text (OpenSSH / PEM / PKCS#8).
-    KeyText { pem: String, passphrase: Option<String> },
+    KeyText {
+        pem: String,
+        passphrase: Option<String>,
+    },
     /// OpenSSH user certificate plus its private key.
-    Certificate { key: PathBuf, cert: PathBuf, passphrase: Option<String> },
+    Certificate {
+        key: PathBuf,
+        cert: PathBuf,
+        passphrase: Option<String>,
+    },
     /// ssh-agent (Unix) / Pageant or the OpenSSH agent pipe (Windows).
     Agent,
     /// "none" method (servers that allow login without credentials).
@@ -101,9 +114,7 @@ impl ProxySpec {
                 Some(v) => v.trim().parse().map_err(|_| Error::invalid(format!("Invalid port: {v}"))),
             }
         };
-        let req = |key: &str, what: &str| -> Result<String> {
-            p.get(key).map(str::to_owned).ok_or_else(|| Error::invalid(format!("{what} is required")))
-        };
+        let req = |key: &str, what: &str| -> Result<String> { p.get(key).map(str::to_owned).ok_or_else(|| Error::invalid(format!("{what} is required"))) };
         Ok(match p.get(keys::MODE).unwrap_or("direct") {
             "direct" => None,
             "ssh" => {
@@ -124,11 +135,7 @@ impl ProxySpec {
             m @ ("socks5" | "http") => {
                 let auth = p.get(keys::PROXY_USER).map(|u| (u.to_string(), s.proxy_password.clone().unwrap_or_default()));
                 let host = req(keys::PROXY_HOST, "Proxy host")?;
-                if m == "socks5" {
-                    Some(ProxySpec::Socks5 { host, port: port(keys::PROXY_PORT, 1080)?, auth })
-                } else {
-                    Some(ProxySpec::Http { host, port: port(keys::PROXY_PORT, 3128)?, auth })
-                }
+                if m == "socks5" { Some(ProxySpec::Socks5 { host, port: port(keys::PROXY_PORT, 1080)?, auth }) } else { Some(ProxySpec::Http { host, port: port(keys::PROXY_PORT, 3128)?, auth }) }
             }
             other => return Err(Error::invalid(format!("Unknown network mode {other}"))),
         })
@@ -351,12 +358,12 @@ pub async fn ssh_connect_via(jump: Option<&client::Handle<HostKeyCheck>>, t: &Ss
                     fp.unwrap_or_default()
                 )));
             }
-            if let (Some(exp), Some(got)) = (t.expected.as_deref(), fp) {
-                if exp != got {
-                    return Err(Error::auth(format!(
-                        "SSH host key for {host} changed (expected {exp}, got {got}). This can mean a man-in-the-middle attack; if the server was rebuilt, clear the pinned key in the connection's SSH settings."
-                    )));
-                }
+            if let (Some(exp), Some(got)) = (t.expected.as_deref(), fp)
+                && exp != got
+            {
+                return Err(Error::auth(format!(
+                    "SSH host key for {host} changed (expected {exp}, got {got}). This can mean a man-in-the-middle attack; if the server was rebuilt, clear the pinned key in the connection's SSH settings."
+                )));
             }
             return Err(Error::connection(format!("SSH {host}:{port}: {e}")));
         }
@@ -382,10 +389,7 @@ pub async fn ssh_connect_via(jump: Option<&client::Handle<HostKeyCheck>>, t: &Ss
                         if rounds > 8 {
                             break false;
                         }
-                        let answers = prompts
-                            .iter()
-                            .map(|p| if p.prompt.to_lowercase().contains("pass") { password.clone() } else { otp.clone().unwrap_or_else(|| password.clone()) })
-                            .collect();
+                        let answers = prompts.iter().map(|p| if p.prompt.to_lowercase().contains("pass") { password.clone() } else { otp.clone().unwrap_or_else(|| password.clone()) }).collect();
                         r = session.authenticate_keyboard_interactive_respond(answers).await.map_err(ce)?;
                     }
                 }
@@ -430,7 +434,11 @@ async fn agent_auth(session: &mut client::Handle<HostKeyCheck>, user: &str) -> R
     agent_try(session, user, a).await
 }
 
-async fn agent_try<S: russh::keys::agent::client::AgentStream + Send + Unpin + 'static>(session: &mut client::Handle<HostKeyCheck>, user: &str, mut agent: russh::keys::agent::client::AgentClient<S>) -> Result<bool> {
+async fn agent_try<S: russh::keys::agent::client::AgentStream + Send + Unpin + 'static>(
+    session: &mut client::Handle<HostKeyCheck>,
+    user: &str,
+    mut agent: russh::keys::agent::client::AgentClient<S>,
+) -> Result<bool> {
     let ids = agent.request_identities().await.map_err(|e| Error::connection(format!("SSH agent: {e}")))?;
     if ids.is_empty() {
         return Err(Error::auth("The SSH agent has no keys loaded (ssh-add)"));

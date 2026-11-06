@@ -109,22 +109,20 @@ pub fn config_dir() -> PathBuf {
     if let Ok(p) = std::env::var("OPENVCLIENT_CONFIG_DIR") {
         return PathBuf::from(p);
     }
-    directories::ProjectDirs::from("dev", "OpenVClient", "OpenVClient")
-        .map(|d| d.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".openvclient"))
+    directories::ProjectDirs::from("dev", "OpenVClient", "OpenVClient").map(|d| d.config_dir().to_path_buf()).unwrap_or_else(|| PathBuf::from(".openvclient"))
 }
 
 impl Store {
     pub fn load() -> Self {
         let path = config_dir().join("workspace.json");
         // One-time move from the pre-rename location ("OpenV").
-        if !path.exists() && std::env::var("OPENVCLIENT_CONFIG_DIR").is_err() {
-            if let Some(old) = directories::ProjectDirs::from("dev", "OpenV", "OpenV").map(|d| d.config_dir().join("workspace.json")) {
-                if old.exists() {
-                    let _ = std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")));
-                    let _ = std::fs::copy(&old, &path);
-                }
-            }
+        if !path.exists()
+            && std::env::var("OPENVCLIENT_CONFIG_DIR").is_err()
+            && let Some(old) = directories::ProjectDirs::from("dev", "OpenV", "OpenV").map(|d| d.config_dir().join("workspace.json"))
+            && old.exists()
+        {
+            let _ = std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")));
+            let _ = std::fs::copy(&old, &path);
         }
         let (ws, load_error) = match std::fs::read(&path) {
             Ok(bytes) => match serde_json::from_slice(&bytes) {

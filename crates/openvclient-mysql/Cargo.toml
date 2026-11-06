@@ -16,3 +16,6 @@ mysql_async = { version = "0.37", default-features = false, features = ["minimal
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

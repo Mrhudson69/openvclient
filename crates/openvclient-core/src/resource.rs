@@ -163,7 +163,6 @@ pub struct Terminal {
     pub output: std::sync::mpsc::Receiver<TermEvent>,
 }
 
-
 #[async_trait]
 pub trait ResourceSession: ServiceSession {
     /// Children of a node; `None` lists the top level.

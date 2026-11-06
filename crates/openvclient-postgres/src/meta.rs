@@ -22,7 +22,7 @@ pub fn group_digits(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -71,8 +71,7 @@ pub async fn children(s: &PgSession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 .map(|r| {
                     let name = r[0].clone().unwrap_or_default();
                     let n = r[1].clone().unwrap_or_default();
-                    TreeNode::new(ObjectKind::Schema, name.clone(), base.clone().with_schema(name))
-                        .detail(if n == "0" { String::new() } else { format!("{n} tables") })
+                    TreeNode::new(ObjectKind::Schema, name.clone(), base.clone().with_schema(name)).detail(if n == "0" { String::new() } else { format!("{n} tables") })
                 })
                 .collect())
         }
@@ -139,9 +138,7 @@ pub async fn children(s: &PgSession, node: Option<(ObjectKind, ObjPath)>) -> Res
                     let name = r[0].clone().unwrap_or_default();
                     let args = r[1].clone().unwrap_or_default();
                     let ret = r[2].clone().map(|t| format!("→ {t} · ")).unwrap_or_default();
-                    TreeNode::new(okind, format!("{name}({args})"), path.clone().with_name(name).with_sub(args))
-                        .detail(format!("{ret}{}", r[3].clone().unwrap_or_default()))
-                        .leaf()
+                    TreeNode::new(okind, format!("{name}({args})"), path.clone().with_name(name).with_sub(args)).detail(format!("{ret}{}", r[3].clone().unwrap_or_default())).leaf()
                 })
                 .collect())
         }
@@ -203,8 +200,7 @@ pub async fn children(s: &PgSession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 .into_iter()
                 .map(|r| {
                     let name = r[0].clone().unwrap_or_default();
-                    TreeNode::new(ObjectKind::Constraint, name.clone(), path.clone().with_sub(name))
-                        .detail(format!("{} · {}", r[1].clone().unwrap_or_default(), r[2].clone().unwrap_or_default()))
+                    TreeNode::new(ObjectKind::Constraint, name.clone(), path.clone().with_sub(name)).detail(format!("{} · {}", r[1].clone().unwrap_or_default(), r[2].clone().unwrap_or_default()))
                 })
                 .collect())
         }
@@ -222,9 +218,7 @@ pub async fn children(s: &PgSession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 .into_iter()
                 .map(|r| {
                     let name = r[0].clone().unwrap_or_default();
-                    TreeNode::new(ObjectKind::Trigger, name.clone(), path.clone().with_sub(name))
-                        .detail(r[1].clone().unwrap_or_default())
-                        .leaf()
+                    TreeNode::new(ObjectKind::Trigger, name.clone(), path.clone().with_sub(name)).detail(r[1].clone().unwrap_or_default()).leaf()
                 })
                 .collect())
         }
@@ -261,11 +255,7 @@ pub async fn columns(s: &PgSession, path: &ObjPath) -> Result<Vec<ColumnInfo>> {
                 default: r[3].clone(),
                 primary_key: r[4].as_deref() == Some("true"),
                 auto_increment: r[5].as_deref() == Some("true"),
-                comment: if generated {
-                    Some(format!("generated: {}", r[3].clone().unwrap_or_default()))
-                } else {
-                    r[6].clone()
-                },
+                comment: if generated { Some(format!("generated: {}", r[3].clone().unwrap_or_default())) } else { r[6].clone() },
             }
         })
         .collect())
@@ -274,67 +264,56 @@ pub async fn columns(s: &PgSession, path: &ObjPath) -> Result<Vec<ColumnInfo>> {
 pub async fn ddl(s: &PgSession, kind: ObjectKind, path: &ObjPath) -> Result<String> {
     let db = s.db_of(path).to_string();
     let schema = path.schema.clone().unwrap_or_default();
-    let one = |rows: Vec<Vec<Option<String>>>| -> Result<String> {
-        rows.into_iter().next().and_then(|r| r.into_iter().next().flatten()).ok_or_else(|| Error::invalid("Object not found"))
-    };
+    let one = |rows: Vec<Vec<Option<String>>>| -> Result<String> { rows.into_iter().next().and_then(|r| r.into_iter().next().flatten()).ok_or_else(|| Error::invalid("Object not found")) };
     match kind {
         ObjectKind::Table | ObjectKind::ForeignTable => table_ddl(s, path).await,
         ObjectKind::View | ObjectKind::MaterializedView => {
-            let def = one(
-                s.text_rows(
+            let def = one(s
+                .text_rows(
                     Some(&db),
                     "SELECT pg_get_viewdef(c.oid, true) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
                     &[&schema, &path.name()?.to_string()],
                 )
-                .await?,
-            )?;
+                .await?)?;
             let head = if kind == ObjectKind::View { "CREATE OR REPLACE VIEW" } else { "CREATE MATERIALIZED VIEW" };
             Ok(format!("{head} {} AS\n{}", D.qualified(Some(&schema), path.name()?), def.trim_end()))
         }
         ObjectKind::Function | ObjectKind::Procedure => {
-            let def = one(
-                s.text_rows(
+            let def = one(s
+                .text_rows(
                     Some(&db),
                     "SELECT pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
                      WHERE n.nspname = $1 AND p.proname = $2 AND pg_get_function_identity_arguments(p.oid) = $3 LIMIT 1",
                     &[&schema, &path.name()?.to_string(), &path.sub.clone().unwrap_or_default()],
                 )
-                .await?,
-            )?;
+                .await?)?;
             Ok(def)
         }
-        ObjectKind::Index => one(
-            s.text_rows(
+        ObjectKind::Index => one(s
+            .text_rows(
                 Some(&db),
                 "SELECT pg_get_indexdef(i.oid) || ';' FROM pg_class i JOIN pg_namespace n ON n.oid = i.relnamespace WHERE n.nspname = $1 AND i.relname = $2",
                 &[&schema, &path.sub.clone().unwrap_or_default()],
             )
-            .await?,
-        ),
-        ObjectKind::Trigger => one(
-            s.text_rows(
+            .await?),
+        ObjectKind::Trigger => one(s
+            .text_rows(
                 Some(&db),
                 "SELECT pg_get_triggerdef(tg.oid, true) || ';' FROM pg_trigger tg JOIN pg_class t ON t.oid = tg.tgrelid \
                  JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = $1 AND t.relname = $2 AND tg.tgname = $3",
                 &[&schema, &path.name()?.to_string(), &path.sub.clone().unwrap_or_default()],
             )
-            .await?,
-        ),
+            .await?),
         ObjectKind::Constraint => {
-            let def = one(
-                s.text_rows(
+            let def = one(s
+                .text_rows(
                     Some(&db),
                     "SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid \
                      JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = $1 AND t.relname = $2 AND c.conname = $3",
                     &[&schema, &path.name()?.to_string(), &path.sub.clone().unwrap_or_default()],
                 )
-                .await?,
-            )?;
-            Ok(format!(
-                "ALTER TABLE {} ADD CONSTRAINT {} {def};",
-                D.qualified(Some(&schema), path.name()?),
-                D.quote_ident(path.sub.as_deref().unwrap_or_default())
-            ))
+                .await?)?;
+            Ok(format!("ALTER TABLE {} ADD CONSTRAINT {} {def};", D.qualified(Some(&schema), path.name()?), D.quote_ident(path.sub.as_deref().unwrap_or_default())))
         }
         ObjectKind::Sequence => {
             let rows = s
@@ -360,9 +339,7 @@ pub async fn ddl(s: &PgSession, kind: ObjectKind, path: &ObjPath) -> Result<Stri
             ))
         }
         ObjectKind::Schema => {
-            let owner = one(
-                s.text_rows(Some(&db), "SELECT pg_get_userbyid(nspowner)::text FROM pg_namespace WHERE nspname = $1", &[&schema]).await?,
-            )?;
+            let owner = one(s.text_rows(Some(&db), "SELECT pg_get_userbyid(nspowner)::text FROM pg_namespace WHERE nspname = $1", &[&schema]).await?)?;
             Ok(format!("CREATE SCHEMA {} AUTHORIZATION {};", D.quote_ident(&schema), D.quote_ident(&owner)))
         }
         ObjectKind::Database => {
@@ -423,11 +400,7 @@ async fn table_ddl(s: &PgSession, path: &ObjPath) -> Result<String> {
         )
         .await?;
     for c in &cons {
-        lines.push(format!(
-            "    CONSTRAINT {} {}",
-            D.quote_ident(c[0].as_deref().unwrap_or_default()),
-            c[1].clone().unwrap_or_default()
-        ));
+        lines.push(format!("    CONSTRAINT {} {}", D.quote_ident(c[0].as_deref().unwrap_or_default()), c[1].clone().unwrap_or_default()));
     }
     let info = s
         .text_rows(
@@ -475,11 +448,7 @@ async fn table_ddl(s: &PgSession, path: &ObjPath) -> Result<String> {
         out.push_str(&format!("\n\nCOMMENT ON TABLE {target} IS {};", D.quote_literal(&c)));
     }
     for c in cols.iter().filter(|c| c.comment.as_deref().is_some_and(|x| !x.starts_with("generated:"))) {
-        out.push_str(&format!(
-            "\nCOMMENT ON COLUMN {target}.{} IS {};",
-            D.quote_ident(&c.name),
-            D.quote_literal(c.comment.as_deref().unwrap_or_default())
-        ));
+        out.push_str(&format!("\nCOMMENT ON COLUMN {target}.{} IS {};", D.quote_ident(&c.name), D.quote_literal(c.comment.as_deref().unwrap_or_default())));
     }
     out.push('\n');
     Ok(out)
@@ -491,11 +460,7 @@ pub async fn table_page(s: &PgSession, q: TableQuery) -> Result<TablePage> {
     let name = q.path.name()?.to_string();
     let cols = columns(s, &q.path).await?;
     let kind = s
-        .text_rows(
-            Some(&db),
-            "SELECT c.relkind::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
-            &[&schema, &name],
-        )
+        .text_rows(Some(&db), "SELECT c.relkind::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2", &[&schema, &name])
         .await?
         .into_iter()
         .next()
@@ -510,11 +475,7 @@ pub async fn table_page(s: &PgSession, q: TableQuery) -> Result<TablePage> {
         sql.push_str(&format!(" WHERE {f}"));
     }
     if !q.order_by.is_empty() {
-        let parts: Vec<String> = q
-            .order_by
-            .iter()
-            .map(|(c, d)| format!("{} {}", D.quote_ident(c), if *d == SortDir::Asc { "ASC NULLS FIRST" } else { "DESC NULLS LAST" }))
-            .collect();
+        let parts: Vec<String> = q.order_by.iter().map(|(c, d)| format!("{} {}", D.quote_ident(c), if *d == SortDir::Asc { "ASC NULLS FIRST" } else { "DESC NULLS LAST" })).collect();
         sql.push_str(&format!(" ORDER BY {}", parts.join(", ")));
     } else if use_ctid {
         sql.push_str(" ORDER BY ctid");
@@ -527,11 +488,7 @@ pub async fn table_page(s: &PgSession, q: TableQuery) -> Result<TablePage> {
     let client = s.client(Some(&db)).await?;
     // Parsing first rejects multi-statement filters and yields column types.
     let stmt = client.prepare(&sql).await.map_err(pg_err)?;
-    let types: Vec<String> = stmt
-        .columns()
-        .iter()
-        .map(|c| cols.iter().find(|x| x.name == c.name()).map(|x| x.data_type.clone()).unwrap_or_else(|| c.type_().name().to_string()))
-        .collect();
+    let types: Vec<String> = stmt.columns().iter().map(|c| cols.iter().find(|x| x.name == c.name()).map(|x| x.data_type.clone()).unwrap_or_else(|| c.type_().name().to_string())).collect();
     drop(stmt);
     let outcome = simple_rows(&client, &sql, usize::MAX, Some(types)).await?;
     let StatementOutcome::Rows(mut rows) = outcome else {
@@ -545,12 +502,15 @@ pub async fn table_page(s: &PgSession, q: TableQuery) -> Result<TablePage> {
     let read_only_reason = if s.target.read_only {
         Some("Connection is read-only".to_string())
     } else if !is_table {
-        Some(format!("{} rows are read-only here", match kind.as_str() {
-            "v" => "View",
-            "m" => "Materialized view",
-            "f" => "Foreign table",
-            _ => "Relation",
-        }))
+        Some(format!(
+            "{} rows are read-only here",
+            match kind.as_str() {
+                "v" => "View",
+                "m" => "Materialized view",
+                "f" => "Foreign table",
+                _ => "Relation",
+            }
+        ))
     } else {
         None
     };
@@ -563,9 +523,7 @@ pub async fn apply_changes(s: &PgSession, path: &ObjPath, changes: Vec<RowChange
     }
     let db = s.db_of(path).to_string();
     let cols = columns(s, path).await?;
-    let ty = |c: &str| -> Result<String> {
-        cols.iter().find(|x| x.name == c).map(|x| x.data_type.clone()).ok_or_else(|| Error::invalid(format!("Unknown column {c}")))
-    };
+    let ty = |c: &str| -> Result<String> { cols.iter().find(|x| x.name == c).map(|x| x.data_type.clone()).ok_or_else(|| Error::invalid(format!("Unknown column {c}"))) };
     let target = D.qualified(path.schema.as_deref(), path.name()?);
     let client = s.client(Some(&db)).await?;
     client.batch_execute("BEGIN").await.map_err(pg_err)?;
@@ -604,8 +562,7 @@ pub async fn apply_changes(s: &PgSession, path: &ObjPath, changes: Vec<RowChange
                     format!("DELETE FROM {target} WHERE {w}")
                 }
             };
-            let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-                params.iter().map(|p| p as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+            let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params.iter().map(|p| p as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
             let n = client.execute(&sql, &refs).await.map_err(pg_err)?;
             if n == 0 {
                 return Err(Error::server("A row was not found (changed or deleted by someone else?). No changes were saved."));
@@ -627,12 +584,7 @@ pub async fn apply_changes(s: &PgSession, path: &ObjPath, changes: Vec<RowChange
     }
 }
 
-fn where_key(
-    key: &RowKey,
-    ty: &dyn Fn(&str) -> Result<String>,
-    params: &mut Vec<Option<String>>,
-    ph: &mut dyn FnMut(Option<String>, &str, &mut Vec<Option<String>>) -> String,
-) -> Result<String> {
+fn where_key(key: &RowKey, ty: &dyn Fn(&str) -> Result<String>, params: &mut Vec<Option<String>>, ph: &mut dyn FnMut(Option<String>, &str, &mut Vec<Option<String>>) -> String) -> Result<String> {
     Ok(match key {
         RowKey::RowId(ctid) => format!("ctid = {}", ph(Some(ctid.clone()), "tid", params)),
         RowKey::PrimaryKey(cols) => {
@@ -683,13 +635,7 @@ pub async fn catalog(s: &PgSession, database: Option<&str>) -> Result<Catalog> {
             entry.push(c);
         }
     }
-    let funcs = s
-        .text_rows(
-            Some(&db),
-            &format!("SELECT DISTINCT p.proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE {USER_SCHEMAS} LIMIT 5000"),
-            &[],
-        )
-        .await?;
+    let funcs = s.text_rows(Some(&db), &format!("SELECT DISTINCT p.proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE {USER_SCHEMAS} LIMIT 5000"), &[]).await?;
     cat.functions = funcs.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect();
     Ok(cat)
 }

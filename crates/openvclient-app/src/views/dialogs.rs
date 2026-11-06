@@ -10,15 +10,42 @@ use crate::bg::{Job, poll};
 use crate::theme;
 
 pub enum Dialog {
-    Folder { parent: String, name: String },
-    RenameFolder { from: String, name: String },
-    MoveToFolder { conn: Uuid, folder: String },
-    CreateDatabase { conn: Uuid, spec: CreateDatabaseSpec, job: Option<Job<Result<()>>> },
-    CreateSchema { conn: Uuid, database: Option<String>, name: String, job: Option<Job<Result<()>>> },
+    Folder {
+        parent: String,
+        name: String,
+    },
+    RenameFolder {
+        from: String,
+        name: String,
+    },
+    MoveToFolder {
+        conn: Uuid,
+        folder: String,
+    },
+    CreateDatabase {
+        conn: Uuid,
+        spec: CreateDatabaseSpec,
+        job: Option<Job<Result<()>>>,
+    },
+    CreateSchema {
+        conn: Uuid,
+        database: Option<String>,
+        name: String,
+        job: Option<Job<Result<()>>>,
+    },
     /// BACKUP/RESTORE to a path on the database server (SQL Server).
-    ServerBackup { conn: Uuid, database: String, restore: bool, path: String },
+    ServerBackup {
+        conn: Uuid,
+        database: String,
+        restore: bool,
+        path: String,
+    },
     /// A running admin job whose outcome becomes a toast.
-    Tracked { job: Job<Result<String>>, done: String, conn: Option<Uuid> },
+    Tracked {
+        job: Job<Result<String>>,
+        done: String,
+        conn: Option<Uuid>,
+    },
 }
 
 impl Dialog {
@@ -75,10 +102,17 @@ impl Dialog {
                 if go {
                     let (db, p) = (database.clone(), std::path::PathBuf::from(path.trim()));
                     if restore {
-                        cx.confirm(Some(conn), format!("Restore {db}?"), format!("Every session in {db} is disconnected and the database is replaced with the contents of {}.", p.display()), "Restore", Some(db.clone()), move |cx| {
-                            let job = cx.bg.spawn(format!("RESTORE {db}"), async move { s.restore(BackupRequest { database: Some(db), path: p }).await });
-                            cx.dialog = Some(Dialog::Tracked { job, done: "Restore finished".into(), conn: Some(conn) });
-                        });
+                        cx.confirm(
+                            Some(conn),
+                            format!("Restore {db}?"),
+                            format!("Every session in {db} is disconnected and the database is replaced with the contents of {}.", p.display()),
+                            "Restore",
+                            Some(db.clone()),
+                            move |cx| {
+                                let job = cx.bg.spawn(format!("RESTORE {db}"), async move { s.restore(BackupRequest { database: Some(db), path: p }).await });
+                                cx.dialog = Some(Dialog::Tracked { job, done: "Restore finished".into(), conn: Some(conn) });
+                            },
+                        );
                     } else {
                         let job = cx.bg.spawn(format!("BACKUP {db}"), async move { s.backup(BackupRequest { database: Some(db), path: p }).await });
                         cx.dialog = Some(Dialog::Tracked { job, done: "Backup finished".into(), conn: None });
@@ -101,9 +135,7 @@ impl Dialog {
                         if (ok || enter) && !new_leaf.is_empty() && !new_leaf.contains('/') {
                             let parent = from_c.rsplit_once('/').map(|(p, _)| format!("{p}/")).unwrap_or_default();
                             let to = format!("{parent}{new_leaf}");
-                            let remap = |f: &str| -> Option<String> {
-                                if f == from_c { Some(to.clone()) } else { f.strip_prefix(&format!("{from_c}/")).map(|rest| format!("{to}/{rest}")) }
-                            };
+                            let remap = |f: &str| -> Option<String> { if f == from_c { Some(to.clone()) } else { f.strip_prefix(&format!("{from_c}/")).map(|rest| format!("{to}/{rest}")) } };
                             for f in cx.store.ws.folders.iter_mut() {
                                 if let Some(n) = remap(f) {
                                     *f = n;
@@ -313,8 +345,15 @@ pub fn start_restore(cx: &mut AppCtx, conn: Uuid, database: Option<String>, labe
     let Some(path) = rfd::FileDialog::new().pick_file() else { return };
     let file = path.display().to_string();
     let label = label.to_string();
-    cx.confirm(Some(conn), format!("Restore into {label}?"), format!("Objects and rows from {file} are written into {label}. Existing data may be overwritten."), "Restore", Some(label.clone()), move |cx| {
-        let job = cx.bg.spawn(format!("Restoring {label}"), async move { s.restore(BackupRequest { database, path }).await });
-        cx.dialog = Some(Dialog::Tracked { job, done: "Restore finished".into(), conn: Some(conn) });
-    });
+    cx.confirm(
+        Some(conn),
+        format!("Restore into {label}?"),
+        format!("Objects and rows from {file} are written into {label}. Existing data may be overwritten."),
+        "Restore",
+        Some(label.clone()),
+        move |cx| {
+            let job = cx.bg.spawn(format!("Restoring {label}"), async move { s.restore(BackupRequest { database, path }).await });
+            cx.dialog = Some(Dialog::Tracked { job, done: "Restore finished".into(), conn: Some(conn) });
+        },
+    );
 }

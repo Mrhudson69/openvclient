@@ -45,7 +45,23 @@ impl ConnDialog {
                 let mut p = ConnectionProfile::new("", "");
                 p.folder = folder.unwrap_or_default();
                 let _ = cx;
-                Self { p, is_new: true, picking: true, secret: String::new(), has_saved_secret: false, show_advanced: false, test: None, test_result: None, error: None, tab: FormTab::Main, picker_filter: String::new(), picker_focus: true, ssh_password: String::new(), ssh_passphrase: String::new(), proxy_password: String::new() }
+                Self {
+                    p,
+                    is_new: true,
+                    picking: true,
+                    secret: String::new(),
+                    has_saved_secret: false,
+                    show_advanced: false,
+                    test: None,
+                    test_result: None,
+                    error: None,
+                    tab: FormTab::Main,
+                    picker_filter: String::new(),
+                    picker_focus: true,
+                    ssh_password: String::new(),
+                    ssh_passphrase: String::new(),
+                    proxy_password: String::new(),
+                }
             }
         }
     }
@@ -59,7 +75,23 @@ impl ConnDialog {
 
     fn edit(p: ConnectionProfile) -> Self {
         let has = p.save_secret;
-        Self { p, is_new: false, picking: false, secret: String::new(), has_saved_secret: has, show_advanced: false, test: None, test_result: None, error: None, tab: FormTab::Main, picker_filter: String::new(), picker_focus: true, ssh_password: String::new(), ssh_passphrase: String::new(), proxy_password: String::new() }
+        Self {
+            p,
+            is_new: false,
+            picking: false,
+            secret: String::new(),
+            has_saved_secret: has,
+            show_advanced: false,
+            test: None,
+            test_result: None,
+            error: None,
+            tab: FormTab::Main,
+            picker_filter: String::new(),
+            picker_focus: true,
+            ssh_password: String::new(),
+            ssh_passphrase: String::new(),
+            proxy_password: String::new(),
+        }
     }
 
     /// Skip the picker and open the form for `driver`.
@@ -300,11 +332,7 @@ impl ConnDialog {
                         let typed_net = (self.ssh_password.clone(), self.ssh_passphrase.clone(), self.proxy_password.clone());
                         self.test = Some(cx.bg.spawn(format!("Testing {}", p.name), async move {
                             let id = p.id;
-                            let secret = if use_saved {
-                                tokio::task::spawn_blocking(move || secrets::get(id)).await.map_err(Error::from)?.map_err(Error::other)?
-                            } else {
-                                typed
-                            };
+                            let secret = if use_saved { tokio::task::spawn_blocking(move || secrets::get(id)).await.map_err(Error::from)?.map_err(Error::other)? } else { typed };
                             let mut net = tokio::task::spawn_blocking(move || crate::conns::net_secrets(id)).await.map_err(Error::from)?;
                             let pick = |typed: String, saved: Option<String>| if typed.is_empty() { saved } else { Some(typed) };
                             net.ssh_password = pick(typed_net.0, net.ssh_password);
@@ -337,11 +365,11 @@ impl ConnDialog {
                                 (openvclient_net::keys::SECRET_SSH_PASSPHRASE, &self.ssh_passphrase),
                                 (openvclient_net::keys::SECRET_PROXY_PASSWORD, &self.proxy_password),
                             ] {
-                                if !v.is_empty() {
-                                    if let Err(e) = secrets::set_named(id, name, v) {
-                                        self.error = Some(e);
-                                        ok = false;
-                                    }
+                                if !v.is_empty()
+                                    && let Err(e) = secrets::set_named(id, name, v)
+                                {
+                                    self.error = Some(e);
+                                    ok = false;
                                 }
                             }
                             if self.p.save_secret && !self.secret.is_empty() {
@@ -425,10 +453,10 @@ impl ConnDialog {
                             ui.label("Private key *");
                             ui.horizontal(|ui| {
                                 text(ui, &mut self.p, SSH_KEY, "~/.ssh/id_ed25519", 300.0);
-                                if ui.button("Browse…").clicked() {
-                                    if let Some(f) = rfd::FileDialog::new().pick_file() {
-                                        self.p.params.insert(SSH_KEY.into(), f.display().to_string());
-                                    }
+                                if ui.button("Browse…").clicked()
+                                    && let Some(f) = rfd::FileDialog::new().pick_file()
+                                {
+                                    self.p.params.insert(SSH_KEY.into(), f.display().to_string());
                                 }
                             });
                             ui.end_row();
@@ -465,7 +493,11 @@ impl ConnDialog {
                     ui.end_row();
                 });
                 ui.add_space(theme::space::XS);
-                ui.label(RichText::new("The database host and port on the Main tab are resolved from the SSH server, so use addresses it can reach (e.g. localhost for a DB on the same machine).").small().color(t.muted_fg));
+                ui.label(
+                    RichText::new("The database host and port on the Main tab are resolved from the SSH server, so use addresses it can reach (e.g. localhost for a DB on the same machine).")
+                        .small()
+                        .color(t.muted_fg),
+                );
             }
             "socks5" | "http" => {
                 egui::Grid::new("proxy_form").num_columns(2).spacing([14.0, 10.0]).min_col_width(130.0).show(ui, |ui| {

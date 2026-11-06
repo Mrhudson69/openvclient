@@ -29,9 +29,7 @@ impl GridState {
         let key = (rs.rows.len(), if server_sort { None } else { self.sort }, self.filter.clone(), generation);
         if self.view_key.as_ref() != Some(&key) {
             let needle = self.filter.to_lowercase();
-            let mut v: Vec<usize> = (0..rs.rows.len())
-                .filter(|&i| needle.is_empty() || rs.rows[i].iter().any(|c| c.display().to_lowercase().contains(&needle)))
-                .collect();
+            let mut v: Vec<usize> = (0..rs.rows.len()).filter(|&i| needle.is_empty() || rs.rows[i].iter().any(|c| c.display().to_lowercase().contains(&needle))).collect();
             if let (Some((c, asc)), false) = (self.sort, server_sort) {
                 v.sort_by(|&a, &b| {
                     let o = rs.rows[a][c].cmp_for_sort(&rs.rows[b][c]);
@@ -46,10 +44,10 @@ impl GridState {
 
     pub fn selected_rows_sorted(&self) -> Vec<usize> {
         let mut v: Vec<usize> = self.selected_rows.iter().copied().collect();
-        if let Some((r, _)) = self.selected {
-            if !v.contains(&r) {
-                v.push(r);
-            }
+        if let Some((r, _)) = self.selected
+            && !v.contains(&r)
+        {
+            v.push(r);
         }
         v.sort();
         v
@@ -138,9 +136,7 @@ impl<'a> Grid<'a> {
             for (c, col) in rs.columns.iter().enumerate() {
                 h.col(|ui| {
                     let arrow = match (self.server_sort, st.sort) {
-                        (Some(order), _) => order.iter().find(|(n, _)| n == &col.name).map(|(_, d)| {
-                            if *d == openvclient_core::sql::SortDir::Asc { " ▲" } else { " ▼" }
-                        }),
+                        (Some(order), _) => order.iter().find(|(n, _)| n == &col.name).map(|(_, d)| if *d == openvclient_core::sql::SortDir::Asc { " ▲" } else { " ▼" }),
                         (None, Some((sc, asc))) if sc == c => Some(if asc { " ▲" } else { " ▼" }),
                         _ => None,
                     };
@@ -262,7 +258,10 @@ impl<'a> Grid<'a> {
                             ui.ctx().copy_text(v);
                             ui.close();
                         }
-                        let rows = { let s = st.selected_rows_sorted(); if s.is_empty() { vec![r] } else { s } };
+                        let rows = {
+                            let s = st.selected_rows_sorted();
+                            if s.is_empty() { vec![r] } else { s }
+                        };
                         ui.menu_button("Copy rows as", |ui| {
                             for f in crate::export::Format::ALL {
                                 if ui.button(f.label()).clicked() {
@@ -289,11 +288,9 @@ impl<'a> Grid<'a> {
                                 events.push(GridEvent::DeleteRows(rows.clone()));
                                 ui.close();
                             }
-                            if pending.is_some() || deleted || inserted {
-                                if ui.button("Revert row").clicked() {
-                                    events.push(GridEvent::RevertRow(r));
-                                    ui.close();
-                                }
+                            if (pending.is_some() || deleted || inserted) && ui.button("Revert row").clicked() {
+                                events.push(GridEvent::RevertRow(r));
+                                ui.close();
                             }
                         }
                     });
@@ -322,28 +319,24 @@ pub fn detail_window(ctx: &egui::Context, id: egui::Id, rs: &ResultSet, st: &mut
         return;
     };
     let mut open = true;
-    egui::Window::new(format!("{} · row {}", rs.columns[c].name, r + 1))
-        .id(id.with("detail"))
-        .open(&mut open)
-        .default_size([520.0, 360.0])
-        .show(ctx, |ui| {
-            let mut text = match v {
-                Value::Text(s) => match serde_json::from_str::<serde_json::Value>(s) {
-                    Ok(j) if s.trim_start().starts_with(['{', '[']) => serde_json::to_string_pretty(&j).unwrap_or_else(|_| s.clone()),
-                    _ => s.clone(),
-                },
-                other => other.to_text().unwrap_or_else(|| "NULL".into()),
-            };
-            ui.horizontal(|ui| {
-                ui.weak(format!("{} · {} chars", rs.columns[c].type_name, text.chars().count()));
-                if ui.button("Copy").clicked() {
-                    ui.ctx().copy_text(text.clone());
-                }
-            });
-            egui::ScrollArea::both().show(ui, |ui| {
-                ui.add(egui::TextEdit::multiline(&mut text).code_editor().desired_width(f32::INFINITY).interactive(true));
-            });
+    egui::Window::new(format!("{} · row {}", rs.columns[c].name, r + 1)).id(id.with("detail")).open(&mut open).default_size([520.0, 360.0]).show(ctx, |ui| {
+        let mut text = match v {
+            Value::Text(s) => match serde_json::from_str::<serde_json::Value>(s) {
+                Ok(j) if s.trim_start().starts_with(['{', '[']) => serde_json::to_string_pretty(&j).unwrap_or_else(|_| s.clone()),
+                _ => s.clone(),
+            },
+            other => other.to_text().unwrap_or_else(|| "NULL".into()),
+        };
+        ui.horizontal(|ui| {
+            ui.weak(format!("{} · {} chars", rs.columns[c].type_name, text.chars().count()));
+            if ui.button("Copy").clicked() {
+                ui.ctx().copy_text(text.clone());
+            }
         });
+        egui::ScrollArea::both().show(ui, |ui| {
+            ui.add(egui::TextEdit::multiline(&mut text).code_editor().desired_width(f32::INFINITY).interactive(true));
+        });
+    });
     if !open {
         st.detail_open = false;
     }

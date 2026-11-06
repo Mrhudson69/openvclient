@@ -12,10 +12,7 @@ use mongodb::bson::{Bson, Document, doc};
 use mongodb::options::IndexOptions;
 use mongodb::{Client, IndexModel};
 use openvclient_core::resource::*;
-use openvclient_core::{
-    Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, ErrorKind, FieldKind, FieldSpec, Result, ResultSet,
-    ServerInfo, ServiceSession, SessionHandle, Value,
-};
+use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, ErrorKind, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 
 pub struct MongoDriver {
     info: DriverInfo,
@@ -150,7 +147,13 @@ impl Driver for MongoDriver {
         let info = client.database("admin").run_command(doc! { "buildInfo": 1 }).await.map_err(m_err)?;
         let version = info.get_str("version").unwrap_or("?").to_string();
         let hello = client.database("admin").run_command(doc! { "hello": 1 }).await.map_err(m_err)?;
-        let role = if hello.get_str("setName").is_ok() { format!("replica set {}", hello.get_str("setName").unwrap_or("")) } else if hello.get_str("msg").ok() == Some("isdbgrid") { "mongos (sharded)".into() } else { "standalone".into() };
+        let role = if hello.get_str("setName").is_ok() {
+            format!("replica set {}", hello.get_str("setName").unwrap_or(""))
+        } else if hello.get_str("msg").ok() == Some("isdbgrid") {
+            "mongos (sharded)".into()
+        } else {
+            "standalone".into()
+        };
         Ok(SessionHandle::Resource(Arc::new(MongoSession {
             client,
             info: ServerInfo { product: format!("MongoDB {version}"), version, details: vec![("Topology".into(), role)] },
@@ -244,10 +247,19 @@ impl ResourceSession for MongoSession {
         match (coll, index) {
             (None, _) => {
                 let s = d.run_command(doc! { "dbStats": 1 }).await.map_err(m_err)?;
-                Ok(Content::Props(s.into_iter().map(|(k, v)| (k, match v {
-                    Bson::String(s) => s,
-                    other => other.into_relaxed_extjson().to_string(),
-                })).collect()))
+                Ok(Content::Props(
+                    s.into_iter()
+                        .map(|(k, v)| {
+                            (
+                                k,
+                                match v {
+                                    Bson::String(s) => s,
+                                    other => other.into_relaxed_extjson().to_string(),
+                                },
+                            )
+                        })
+                        .collect(),
+                ))
             }
             (Some(c), Some(name)) => {
                 let mut cur = d.collection::<Document>(&c).list_indexes().await.map_err(m_err)?;
@@ -281,18 +293,27 @@ impl ResourceSession for MongoSession {
     fn actions(&self, kind: &str) -> Vec<ActionSpec> {
         let json = |k: &'static str, l: &'static str, ph: &'static str| FieldSpec::text(k, l).placeholder(ph).required();
         match kind {
-            "" => vec![ActionSpec::new("create_db", "New database…").field(FieldSpec::text("name", "Database").required()).field(FieldSpec::text("collection", "First collection").required().help("MongoDB creates a database when its first collection is created."))],
-            "database" => vec![
-                ActionSpec::new("create_coll", "New collection…").primary().field(FieldSpec::text("name", "Collection").required()),
-                ActionSpec::new("drop_db", "Drop database").destructive(),
+            "" => vec![
+                ActionSpec::new("create_db", "New database…")
+                    .field(FieldSpec::text("name", "Database").required())
+                    .field(FieldSpec::text("collection", "First collection").required().help("MongoDB creates a database when its first collection is created.")),
             ],
+            "database" => {
+                vec![ActionSpec::new("create_coll", "New collection…").primary().field(FieldSpec::text("name", "Collection").required()), ActionSpec::new("drop_db", "Drop database").destructive()]
+            }
             "collection" => vec![
                 ActionSpec::new("insert", "Insert document…").primary().field(json("document", "Document (JSON)", r#"{"name": "Ann", "age": 31}"#)),
                 ActionSpec::new("update", "Update many…").field(json("filter_json", "Filter", r#"{"status": "pending"}"#)).field(json("update_json", "Update", r#"{"$set": {"status": "done"}}"#)),
                 ActionSpec::new("delete", "Delete many…").destructive().field(json("filter_json", "Filter", r#"{"status": "cancelled"}"#)),
-                ActionSpec::new("create_index", "Create index…").field(json("keys_json", "Keys", r#"{"email": 1}"#)).field(FieldSpec::text("unique", "Unique").kind(FieldKind::Bool).default("false")).field(FieldSpec::text("name", "Name").placeholder("auto")),
-                ActionSpec::new("export", "Export to JSON file…").field(FieldSpec::text("path", "File").kind(FieldKind::File { save: true, filters: &["json"] }).default("export.json").required()).field(FieldSpec::text("filter_json", "Filter").placeholder("{} = all")),
-                ActionSpec::new("import", "Import JSON file…").field(FieldSpec::text("path", "File").kind(FieldKind::File { save: false, filters: &["json"] }).required().help("A JSON array of documents, or one document per line")),
+                ActionSpec::new("create_index", "Create index…")
+                    .field(json("keys_json", "Keys", r#"{"email": 1}"#))
+                    .field(FieldSpec::text("unique", "Unique").kind(FieldKind::Bool).default("false"))
+                    .field(FieldSpec::text("name", "Name").placeholder("auto")),
+                ActionSpec::new("export", "Export to JSON file…")
+                    .field(FieldSpec::text("path", "File").kind(FieldKind::File { save: true, filters: &["json"] }).default("export.json").required())
+                    .field(FieldSpec::text("filter_json", "Filter").placeholder("{} = all")),
+                ActionSpec::new("import", "Import JSON file…")
+                    .field(FieldSpec::text("path", "File").kind(FieldKind::File { save: false, filters: &["json"] }).required().help("A JSON array of documents, or one document per line")),
                 ActionSpec::new("rename", "Rename…").field(FieldSpec::text("to", "New name").required()),
                 ActionSpec::new("drop_coll", "Drop collection").destructive(),
             ],
@@ -411,11 +432,11 @@ impl ResourceSession for MongoSession {
         }
         let out = self.client.database(&db).run_command(cmd).await.map_err(m_err)?;
         // Show cursor batches as a table when the command returned documents.
-        if let Ok(c) = out.get_document("cursor") {
-            if let Ok(batch) = c.get_array("firstBatch") {
-                let docs: Vec<Document> = batch.iter().filter_map(|b| b.as_document().cloned()).collect();
-                return Ok(Content::TableWithNote(docs_table(&docs), format!("{} documents in first batch", docs.len())));
-            }
+        if let Ok(c) = out.get_document("cursor")
+            && let Ok(batch) = c.get_array("firstBatch")
+        {
+            let docs: Vec<Document> = batch.iter().filter_map(|b| b.as_document().cloned()).collect();
+            return Ok(Content::TableWithNote(docs_table(&docs), format!("{} documents in first batch", docs.len())));
         }
         Ok(Content::Json(serde_json::to_string_pretty(&to_json(out)).unwrap_or_default()))
     }

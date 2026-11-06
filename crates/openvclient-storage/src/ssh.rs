@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use openvclient_core::resource::*;
-use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, ResultSet, Result, ServerInfo, ServiceSession, SessionHandle, Value};
+use openvclient_core::{Category, ColumnMeta, ConnectParams, Driver, DriverInfo, Error, FieldKind, FieldSpec, Result, ResultSet, ServerInfo, ServiceSession, SessionHandle, Value};
 use openvclient_net::{HostKeyCheck, SshAuth, SshTarget, ssh_connect_via};
 use russh::ChannelMsg;
 use russh::client::Handle;
@@ -76,7 +76,11 @@ impl Driver for SshDriver {
             "keyboard_interactive" => SshAuth::KeyboardInteractive { password: secret.clone().unwrap_or_default(), otp: p.get("otp").map(str::to_owned) },
             "key" => SshAuth::Key { path: key_file()?, passphrase: secret.clone() },
             "key_text" => SshAuth::KeyText { pem: secret.clone().ok_or_else(|| Error::invalid("Paste the private key into the secret field"))?, passphrase: None },
-            "certificate" => SshAuth::Certificate { key: key_file()?, cert: p.get("cert_path").map(expand_home).ok_or_else(|| Error::invalid("Choose the certificate file (*-cert.pub)"))?, passphrase: secret.clone() },
+            "certificate" => SshAuth::Certificate {
+                key: key_file()?,
+                cert: p.get("cert_path").map(expand_home).ok_or_else(|| Error::invalid("Choose the certificate file (*-cert.pub)"))?,
+                passphrase: secret.clone(),
+            },
             "agent" => SshAuth::Agent,
             "none" => SshAuth::None,
             _ => SshAuth::Password(secret.clone().unwrap_or_default()),
@@ -89,7 +93,13 @@ impl Driver for SshDriver {
                     Some(k) => SshAuth::Key { path: expand_home(k), passphrase: None },
                     None => SshAuth::Agent,
                 };
-                let jt = SshTarget { host: jh.to_string(), port: p.get("jump_port").and_then(|v| v.parse().ok()).unwrap_or(22), user: p.get("jump_user").unwrap_or(&user).to_string(), auth: jauth, expected: None };
+                let jt = SshTarget {
+                    host: jh.to_string(),
+                    port: p.get("jump_port").and_then(|v| v.parse().ok()).unwrap_or(22),
+                    user: p.get("jump_user").unwrap_or(&user).to_string(),
+                    auth: jauth,
+                    expected: None,
+                };
                 let (j, _) = ssh_connect_via(None, &jt, timeout).await.map_err(|e| Error { message: format!("Jump host {jh}: {}", e.message), ..e })?;
                 let inner = ssh_connect_via(Some(&j), &target, timeout).await?;
                 (Some(Arc::new(j)), inner)
@@ -113,7 +123,12 @@ impl Driver for SshDriver {
         let info = ServerInfo {
             product: format!("SSH {user}@{host}"),
             version: String::new(),
-            details: vec![("System".into(), uname), ("Host key (SHA256)".into(), fingerprint), ("SFTP".into(), if sftp.is_some() { "available".into() } else { "not available".into() }), ("Start folder".into(), home.clone())],
+            details: vec![
+                ("System".into(), uname),
+                ("Host key (SHA256)".into(), fingerprint),
+                ("SFTP".into(), if sftp.is_some() { "available".into() } else { "not available".into() }),
+                ("Start folder".into(), home.clone()),
+            ],
         };
         Ok(SessionHandle::Resource(Arc::new(SshSession { handle, _jump: jump, sftp, home, read_only: p.read_only, info })))
     }
@@ -137,10 +152,8 @@ async fn run(h: &Handle<HostKeyCheck>, cmd: &str) -> Result<(String, Option<u32>
                 ChannelMsg::Data { data } => out.extend_from_slice(&data),
                 ChannelMsg::ExtendedData { data, .. } => out.extend_from_slice(&data),
                 ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
-                ChannelMsg::Eof | ChannelMsg::Close => {
-                    if status.is_some() {
-                        break;
-                    }
+                ChannelMsg::Eof | ChannelMsg::Close if status.is_some() => {
+                    break;
                 }
                 _ => {}
             }
@@ -247,7 +260,11 @@ impl ResourceSession for SshSession {
             .into_iter()
             .map(|(name, is_dir, size, _)| {
                 let path = join(dir, &name);
-                if is_dir { Node::new(format!("d:{path}"), name, "dir", NodeIcon::Folder).folder() } else { Node::new(format!("f:{path}"), name, "file", NodeIcon::File).detail(openvclient_core::containers::human_bytes(size)) }
+                if is_dir {
+                    Node::new(format!("d:{path}"), name, "dir", NodeIcon::Folder).folder()
+                } else {
+                    Node::new(format!("f:{path}"), name, "file", NodeIcon::File).detail(openvclient_core::containers::human_bytes(size))
+                }
             })
             .collect())
     }

@@ -109,12 +109,13 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+        {
+            out.push(v);
+            i += 3;
+            continue;
         }
         out.push(b[i]);
         i += 1;
@@ -168,10 +169,7 @@ impl ResourceSession for RabbitSession {
             }
             Some(id) if id.starts_with("v/") => {
                 let vh = &id[2..];
-                Ok(vec![
-                    Node::new(format!("qs/{vh}"), "Queues", "queues", NodeIcon::Folder).folder(),
-                    Node::new(format!("xs/{vh}"), "Exchanges", "exchanges", NodeIcon::Folder).folder(),
-                ])
+                Ok(vec![Node::new(format!("qs/{vh}"), "Queues", "queues", NodeIcon::Folder).folder(), Node::new(format!("xs/{vh}"), "Exchanges", "exchanges", NodeIcon::Folder).folder()])
             }
             Some(id) if id.starts_with("qs/") => {
                 let vh = &id[3..];
@@ -212,7 +210,22 @@ impl ResourceSession for RabbitSession {
                 let v = self.call(Method::GET, "/api/overview", None).await?;
                 Ok(Content::Props(props(
                     &v,
-                    &["rabbitmq_version", "erlang_version", "cluster_name", "node", "queue_totals.messages", "queue_totals.messages_ready", "queue_totals.messages_unacknowledged", "object_totals.connections", "object_totals.channels", "object_totals.queues", "object_totals.exchanges", "object_totals.consumers", "message_stats.publish", "message_stats.deliver_get"],
+                    &[
+                        "rabbitmq_version",
+                        "erlang_version",
+                        "cluster_name",
+                        "node",
+                        "queue_totals.messages",
+                        "queue_totals.messages_ready",
+                        "queue_totals.messages_unacknowledged",
+                        "object_totals.connections",
+                        "object_totals.channels",
+                        "object_totals.queues",
+                        "object_totals.exchanges",
+                        "object_totals.consumers",
+                        "message_stats.publish",
+                        "message_stats.deliver_get",
+                    ],
                 )))
             }
             "#connections" => {
@@ -229,7 +242,10 @@ impl ResourceSession for RabbitSession {
                     let (vh, name) = split(rest).ok_or_else(|| Error::invalid("Bad node"))?;
                     let base = format!("/api/queues/{}/{}", enc(&vh), enc(&name));
                     let q = self.call(Method::GET, &base, None).await?;
-                    let mut p = props(&q, &["name", "vhost", "type", "state", "durable", "auto_delete", "exclusive", "messages", "messages_ready", "messages_unacknowledged", "consumers", "memory", "node", "arguments"]);
+                    let mut p = props(
+                        &q,
+                        &["name", "vhost", "type", "state", "durable", "auto_delete", "exclusive", "messages", "messages_ready", "messages_unacknowledged", "consumers", "memory", "node", "arguments"],
+                    );
                     let b = self.call(Method::GET, &format!("{base}/bindings"), None).await?;
                     for x in b.as_array().cloned().unwrap_or_default() {
                         let src = x.get("source").and_then(|s| s.as_str()).unwrap_or("");
@@ -244,7 +260,15 @@ impl ResourceSession for RabbitSession {
                     let mut p = props(&x, &["name", "vhost", "type", "durable", "auto_delete", "internal", "arguments"]);
                     let b = self.call(Method::GET, &format!("/api/exchanges/{}/{}/bindings/source", enc(&vh), enc(&ex)), None).await?;
                     for x in b.as_array().cloned().unwrap_or_default() {
-                        p.push(("binding".into(), format!("→ {} {} key '{}'", x.get("destination_type").and_then(|s| s.as_str()).unwrap_or(""), x.get("destination").and_then(|s| s.as_str()).unwrap_or(""), x.get("routing_key").and_then(|s| s.as_str()).unwrap_or(""))));
+                        p.push((
+                            "binding".into(),
+                            format!(
+                                "→ {} {} key '{}'",
+                                x.get("destination_type").and_then(|s| s.as_str()).unwrap_or(""),
+                                x.get("destination").and_then(|s| s.as_str()).unwrap_or(""),
+                                x.get("routing_key").and_then(|s| s.as_str()).unwrap_or("")
+                            ),
+                        ));
                     }
                     return Ok(Content::Props(p));
                 }
@@ -274,10 +298,12 @@ impl ResourceSession for RabbitSession {
                     .field(FieldSpec::text("durable", "Durable").kind(FieldKind::Bool).default("true")),
             ],
             "queue" => vec![
-                ActionSpec::new("get", "Get messages…")
-                    .primary()
-                    .field(FieldSpec::text("count", "Count").kind(FieldKind::Number).default("10"))
-                    .field(FieldSpec::text("ackmode", "Mode").kind(FieldKind::Choice(&["requeue", "ack"])).default("requeue").help("requeue: peek and put back (marks them redelivered) · ack: remove them from the queue")),
+                ActionSpec::new("get", "Get messages…").primary().field(FieldSpec::text("count", "Count").kind(FieldKind::Number).default("10")).field(
+                    FieldSpec::text("ackmode", "Mode")
+                        .kind(FieldKind::Choice(&["requeue", "ack"]))
+                        .default("requeue")
+                        .help("requeue: peek and put back (marks them redelivered) · ack: remove them from the queue"),
+                ),
                 ActionSpec::new("publish_queue", "Publish to queue…").field(FieldSpec::text("payload", "Payload").required()),
                 ActionSpec::new("purge", "Purge messages").destructive(),
                 ActionSpec::new("delete_queue", "Delete queue").destructive(),
@@ -322,7 +348,13 @@ impl ResourceSession for RabbitSession {
                             self.guard()?;
                         }
                         let count: u64 = a.get("count").and_then(|c| c.parse().ok()).unwrap_or(10).clamp(1, 1000);
-                        let v = self.call(Method::POST, &format!("{base}/get"), Some(json!({ "count": count, "ackmode": if ack { "ack_requeue_false" } else { "ack_requeue_true" }, "encoding": "auto", "truncate": 50000 }))).await?;
+                        let v = self
+                            .call(
+                                Method::POST,
+                                &format!("{base}/get"),
+                                Some(json!({ "count": count, "ackmode": if ack { "ack_requeue_false" } else { "ack_requeue_true" }, "encoding": "auto", "truncate": 50000 })),
+                            )
+                            .await?;
                         let rows: Vec<J> = v
                             .as_array()
                             .cloned()
@@ -331,7 +363,8 @@ impl ResourceSession for RabbitSession {
                             .map(|m| json!({ "payload": m["payload"], "routing_key": m["routing_key"], "exchange": m["exchange"], "redelivered": m["redelivered"], "properties": m["properties"], "encoding": m["payload_encoding"] }))
                             .collect();
                         let n = rows.len();
-                        Ok(ActionOutcome::msg(format!("{n} message(s) {}", if ack { "taken" } else { "peeked and requeued" })).show(Content::Table(objects_table(&rows, &["payload", "routing_key", "exchange", "redelivered"]))))
+                        Ok(ActionOutcome::msg(format!("{n} message(s) {}", if ack { "taken" } else { "peeked and requeued" }))
+                            .show(Content::Table(objects_table(&rows, &["payload", "routing_key", "exchange", "redelivered"]))))
                     }
                     "publish_queue" => {
                         let body = json!({ "properties": {}, "routing_key": name, "payload": arg(&a, "payload")?, "payload_encoding": "string" });
@@ -365,7 +398,8 @@ impl ResourceSession for RabbitSession {
                     }
                     "bind" => {
                         let q = arg(&a, "queue")?;
-                        self.call(Method::POST, &format!("/api/bindings/{}/e/{}/q/{}", enc(&vh), enc(&ex), enc(q)), Some(json!({ "routing_key": a.get("routing_key").cloned().unwrap_or_default() }))).await?;
+                        self.call(Method::POST, &format!("/api/bindings/{}/e/{}/q/{}", enc(&vh), enc(&ex), enc(q)), Some(json!({ "routing_key": a.get("routing_key").cloned().unwrap_or_default() })))
+                            .await?;
                         Ok(ActionOutcome::msg(format!("Bound {q} to {ex}")))
                     }
                     _ => {

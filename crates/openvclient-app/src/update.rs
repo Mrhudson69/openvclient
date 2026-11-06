@@ -98,7 +98,13 @@ pub async fn download(name: String, url: String) -> Result<std::path::PathBuf> {
 }
 
 pub fn open_url(url: &str) {
-    let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
     let _ = std::process::Command::new(opener).arg(url).spawn();
 }
 
@@ -112,6 +118,16 @@ mod tests {
         assert!(is_newer("1.0.0", "1.0.0-beta.2"));
         assert!(!is_newer("v0.1.0", "0.1.0"));
         assert!(!is_newer("0.1.0-rc.1", "0.1.0"));
-        assert!(asset_matches(&format!("openvclient-1.0.0-{}-{}.zip", if cfg!(target_os = "macos") { "macos" } else if cfg!(windows) { "windows" } else { "linux" }, std::env::consts::ARCH)));
+        assert!(asset_matches(&format!(
+            "openvclient-1.0.0-{}-{}.zip",
+            if cfg!(target_os = "macos") {
+                "macos"
+            } else if cfg!(windows) {
+                "windows"
+            } else {
+                "linux"
+            },
+            std::env::consts::ARCH
+        )));
     }
 }

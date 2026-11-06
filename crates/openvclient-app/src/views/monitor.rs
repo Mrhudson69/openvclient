@@ -160,7 +160,8 @@ impl MonitorTab {
                 Some(Ok(rs)) => {
                     let rs = rs.clone();
                     ui.label(RichText::new(format!("{} lock(s)", rs.rows.len())).color(t.muted_fg));
-                    Grid { id: egui::Id::unique(("locks", self.conn)), rs: &rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: self.generation, row_offset: 0 }.show(ui, &mut self.lock_grid);
+                    Grid { id: egui::Id::unique(("locks", self.conn)), rs: &rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: self.generation, row_offset: 0 }
+                        .show(ui, &mut self.lock_grid);
                 }
             },
         }
@@ -214,13 +215,13 @@ impl MonitorTab {
         // Optionally hide idle connections (PostgreSQL `state`, MySQL `Command`).
         let mut rs = snap.rows.clone();
         let state_col = rs.column_index("state").or_else(|| rs.column_index("Command"));
-        if self.hide_idle {
-            if let Some(c) = state_col {
-                rs.rows.retain(|r| {
-                    let v = r[c].display().to_lowercase();
-                    !(v == "idle" || v == "sleep" || v.is_empty() || v == "null")
-                });
-            }
+        if self.hide_idle
+            && let Some(c) = state_col
+        {
+            rs.rows.retain(|r| {
+                let v = r[c].display().to_lowercase();
+                !(v == "idle" || v == "sleep" || v.is_empty() || v == "null")
+            });
         }
         let sel_id = self.grid.selected.and_then(|(r, _)| rs.rows.get(r)).map(|row| row[snap.id_column].to_text().unwrap_or_default());
         ui.horizontal(|ui| {
@@ -239,19 +240,28 @@ impl MonitorTab {
                         self.kill_job = Some(cx.bg.spawn(format!("Cancel {id2}"), async move { s.kill(&id2, KillMode::CancelQuery).await }));
                     }
                 }
-                if can_kill && ui.add_enabled(!busy, egui::Button::new(RichText::new(ico(ICON_POWER_SETTINGS_NEW, "Terminate…")).color(t.destructive))).clicked() {
-                    if let Some(s) = cx.conns.session(self.conn).and_then(|h| h.sql()).cloned() {
-                        let id2 = id.clone();
-                        cx.confirm(Some(self.conn), format!("Terminate session {id2}?"), "The client is disconnected and its open transaction is rolled back.", "Terminate", Some(id2.clone()), move |cx| {
+                if can_kill
+                    && ui.add_enabled(!busy, egui::Button::new(RichText::new(ico(ICON_POWER_SETTINGS_NEW, "Terminate…")).color(t.destructive))).clicked()
+                    && let Some(s) = cx.conns.session(self.conn).and_then(|h| h.sql()).cloned()
+                {
+                    let id2 = id.clone();
+                    cx.confirm(
+                        Some(self.conn),
+                        format!("Terminate session {id2}?"),
+                        "The client is disconnected and its open transaction is rolled back.",
+                        "Terminate",
+                        Some(id2.clone()),
+                        move |cx| {
                             crate::views::dialogs::track(cx, format!("Terminate {id2}"), "Session terminated", None, async move { s.kill(&id2, KillMode::Terminate).await });
-                        });
-                    }
+                        },
+                    );
                 }
             } else {
                 ui.label(RichText::new("Select a row to cancel or terminate it").color(t.muted_fg));
             }
         });
-        Grid { id: egui::Id::unique(("sessions", self.conn, self.hide_idle)), rs: &rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: self.generation, row_offset: 0 }.show(ui, &mut self.grid);
+        Grid { id: egui::Id::unique(("sessions", self.conn, self.hide_idle)), rs: &rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: self.generation, row_offset: 0 }
+            .show(ui, &mut self.grid);
     }
 }
 
@@ -260,10 +270,7 @@ fn sparkline(ui: &mut egui::Ui, data: &VecDeque<f64>, color: egui::Color32) {
     let (min, max) = data.iter().fold((f64::MAX, f64::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
     let span = (max - min).max(1e-9);
     let n = data.len();
-    let pts: Vec<egui::Pos2> = data
-        .iter()
-        .enumerate()
-        .map(|(i, v)| egui::pos2(rect.left() + rect.width() * i as f32 / (n - 1) as f32, rect.bottom() - rect.height() * ((v - min) / span) as f32))
-        .collect();
+    let pts: Vec<egui::Pos2> =
+        data.iter().enumerate().map(|(i, v)| egui::pos2(rect.left() + rect.width() * i as f32 / (n - 1) as f32, rect.bottom() - rect.height() * ((v - min) / span) as f32)).collect();
     ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(1.5, color)));
 }
