@@ -55,7 +55,14 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
         ui.horizontal_wrapped(|ui| {
             let infos: Vec<openvclient_core::DriverInfo> = cx.conns.registry.all().iter().map(|d| d.info().clone()).collect();
             for i in infos {
-                let r = ui.add(egui::Button::new(ico(crate::views::driver_icon(i.id), i.name))).on_hover_text(i.description);
+                let r = if theme::is_cartoon() {
+                    // Room on the left for the connector sticker, painted over the button.
+                    let r = ui.add(egui::Button::new(format!("        {}", i.name))).on_hover_text(i.description);
+                    theme::paint_connector_sticker(ui.painter(), egui::pos2(r.rect.left() + 17.0, r.rect.center().y), 18.0, i.id, ui.visuals().dark_mode);
+                    r
+                } else {
+                    ui.add(egui::Button::new(ico(crate::views::driver_icon(i.id), i.name))).on_hover_text(i.description)
+                };
                 if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     cx.cmd(Cmd::NewConnectionOf(i.id));
                 }
@@ -107,7 +114,7 @@ fn connection_card(ui: &mut egui::Ui, cx: &mut AppCtx, p: &openvclient_core::Con
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     let hovered = resp.hovered();
-    ui.painter().rect(rect, 10.0, if hovered { t.muted } else { t.card }, egui::Stroke::new(if hovered { 1.5 } else { 1.0 }, if hovered { t.ring } else { t.border }), egui::StrokeKind::Inside);
+    theme::paint_card(ui, rect, hovered);
     let env = theme::env_color(ui, p.environment);
     // Environment stripe on the left edge (also stated in text by the badge).
     ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 10.0), egui::vec2(3.0, h - 20.0)), 2.0, env);
@@ -118,7 +125,7 @@ fn connection_card(ui: &mut egui::Ui, cx: &mut AppCtx, p: &openvclient_core::Con
         let ui = &mut child;
         ui.spacing_mut().item_spacing = egui::vec2(theme::space::SM, 4.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(String::from(crate::views::driver_icon(&p.driver))).size(theme::icon::LG).color(env));
+            crate::views::driver_glyph(ui, &p.driver, theme::icon::LG, env);
             // Name left-aligned and truncated; the badge keeps a fixed slot on the right.
             let name_w = (ui.available_width() - 56.0).max(40.0);
             ui.allocate_ui_with_layout(egui::vec2(name_w, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {

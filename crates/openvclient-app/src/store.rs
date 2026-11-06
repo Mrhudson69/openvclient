@@ -14,6 +14,8 @@ pub enum ThemeChoice {
     System,
     Dark,
     Light,
+    /// The playful look of openvclient.xyz; follows the system's day/night setting.
+    Cartoon,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

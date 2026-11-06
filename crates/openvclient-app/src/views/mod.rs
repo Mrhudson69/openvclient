@@ -62,6 +62,19 @@ pub fn driver_icon(driver: &str) -> MaterialIcon {
     }
 }
 
+/// Connector logo: the material icon in the original themes, a cartoon
+/// sticker in the cartoon theme. Decorative: the connector name is always next to it.
+pub fn driver_glyph(ui: &mut egui::Ui, driver: &str, size: f32, color: egui::Color32) -> egui::Response {
+    if theme::is_cartoon() {
+        let s = size + 6.0;
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(s, s), egui::Sense::hover());
+        theme::paint_connector_sticker(ui.painter(), rect.center(), s, driver, ui.visuals().dark_mode);
+        resp
+    } else {
+        ui.label(RichText::new(String::from(driver_icon(driver))).size(size).color(color))
+    }
+}
+
 /// Human name of a connector, e.g. "PostgreSQL".
 pub fn driver_label(cx: &crate::app::AppCtx, driver: &str) -> String {
     cx.conns.registry.get(driver).map(|d| d.info().name.to_string()).unwrap_or_else(|| driver.to_string())

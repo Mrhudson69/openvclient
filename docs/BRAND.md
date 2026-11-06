@@ -50,3 +50,9 @@ python3 scripts/make-logo.py              # SVGs in assets/brand/
 # render the light mark to assets/icon/openvclient.png (1024 px, transparent), then:
 python3 scripts/make-icons.py             # app icons, installer artwork
 ```
+
+## Cartoon theme (in the app)
+
+Settings → Theme → **Cartoon** brings the website's look into the app; System, Dark and Light keep the original look, and System stays the default. Cartoon follows the system's day/night setting: cream paper by day (`theme::CARTOON_DAY`), the site's indigo night palette by night (`theme::CARTOON_NIGHT`). Buttons, cards and windows get ink outlines and hard offset shadows, primary buttons are green stickers with ink text.
+
+**Connector stickers:** each connector gets a sticker logo, as on the website's connector board: a rounded tile with an ink outline, a hard shadow and the connector's two-letter code (PG, MY, S3, AZ, SH…). The tile colour gives the group: blue for SQL databases, coral for NoSQL and messaging, teal for object storage, yellow for servers. Stickers appear in the sidebar, the home cards and connector list, and the New connection picker. They are drawn in code (`theme::paint_connector_sticker`), so they stay sharp at every size. The original themes keep the line icons.

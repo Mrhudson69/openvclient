@@ -742,7 +742,8 @@ impl OpenvApp {
                     let (icon, next, tip) = match self.cx.store.ws.settings.theme {
                         ThemeChoice::System => (ICON_CONTRAST, ThemeChoice::Dark, "Theme: system (click for dark)"),
                         ThemeChoice::Dark => (ICON_DARK_MODE, ThemeChoice::Light, "Theme: dark (click for light)"),
-                        ThemeChoice::Light => (ICON_LIGHT_MODE, ThemeChoice::System, "Theme: light (click for system)"),
+                        ThemeChoice::Light => (ICON_LIGHT_MODE, ThemeChoice::Cartoon, "Theme: light (click for cartoon)"),
+                        ThemeChoice::Cartoon => (ICON_PALETTE, ThemeChoice::System, "Theme: cartoon (click for system)"),
                     };
                     if ui.button(String::from(icon)).on_hover_text(tip).clicked() {
                         self.cx.store.ws.settings.theme = next;
@@ -1076,8 +1077,13 @@ impl OpenvApp {
                 };
                 ui.label(RichText::new("APPEARANCE").small().strong().color(t.muted_fg));
                 row(ui, "Theme", "", &mut |ui| {
-                    for (v, l) in [(ThemeChoice::System, "System"), (ThemeChoice::Dark, "Dark"), (ThemeChoice::Light, "Light")] {
-                        if ui.selectable_value(&mut s.theme, v, l).clicked() {
+                    for (v, l, tip) in [
+                        (ThemeChoice::System, "System", "Original theme, light or dark like your system"),
+                        (ThemeChoice::Dark, "Dark", "Original dark theme"),
+                        (ThemeChoice::Light, "Light", "Original light theme"),
+                        (ThemeChoice::Cartoon, "Cartoon", "Playful theme from openvclient.xyz: outlines, sticker shadows and connector stickers. Day or night like your system"),
+                    ] {
+                        if ui.selectable_value(&mut s.theme, v, l).on_hover_text(tip).clicked() {
                             apply_theme(ui.ctx(), v);
                         }
                     }
@@ -1152,8 +1158,9 @@ impl OpenvApp {
 }
 
 pub fn apply_theme(ctx: &egui::Context, t: ThemeChoice) {
+    theme::set_cartoon(ctx, t == ThemeChoice::Cartoon);
     ctx.set_theme(match t {
-        ThemeChoice::System => egui::ThemePreference::System,
+        ThemeChoice::System | ThemeChoice::Cartoon => egui::ThemePreference::System,
         ThemeChoice::Dark => egui::ThemePreference::Dark,
         ThemeChoice::Light => egui::ThemePreference::Light,
     });
@@ -1627,6 +1634,73 @@ mod walkthrough {
         shot(&mut h, &out, "f4-files-light");
         h.state_mut().cx.show_about = true;
         shot(&mut h, &out, "f5-about");
+        drop(h);
+        rt.shutdown_timeout(Duration::from_secs(1));
+    }
+
+    /// Cartoon theme screenshots on a scratch workspace (no real connections):
+    /// `OPENVCLIENT_CONFIG_DIR=<empty dir> OPENVCLIENT_SHOTS=<out> cargo test -p openvclient-app cartoon_walkthrough -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn cartoon_walkthrough() {
+        use openvclient_core::{ConnectionProfile, Environment};
+        let out = std::path::PathBuf::from(std::env::var("OPENVCLIENT_SHOTS").expect("set OPENVCLIENT_SHOTS"));
+        std::fs::create_dir_all(&out).unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let handle = rt.handle().clone();
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_pixels_per_point(1.5).with_max_steps(64).build_eframe(move |cc| {
+            theme::install(&cc.egui_ctx);
+            OpenvApp::new(&cc.egui_ctx, handle, crate::registry())
+        });
+        let db = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/shop.db").canonicalize().expect("demo/shop.db");
+        let mut shop = ConnectionProfile::new("sqlite", "Shop demo");
+        shop.params.insert("path".into(), db.display().to_string());
+        let shop_id = shop.id;
+        let mut others = Vec::new();
+        for (driver, name, env) in [
+            ("postgres", "Orders (staging)", Environment::Staging),
+            ("redis", "Session cache", Environment::Development),
+            ("s3", "Media bucket", Environment::Production),
+            ("mongodb", "Events", Environment::Testing),
+            ("ssh", "bastion-01", Environment::Production),
+        ] {
+            let mut p = ConnectionProfile::new(driver, name);
+            p.environment = env;
+            others.push(p);
+        }
+        {
+            let app = h.state_mut();
+            app.cx.store.ws.profiles.push(shop);
+            app.cx.store.ws.profiles.extend(others);
+            app.cx.store.ws.settings.theme = ThemeChoice::Cartoon;
+        }
+        h.ctx.set_theme(egui::Theme::Light);
+        theme::set_cartoon(&h.ctx, true);
+        shot(&mut h, &out, "c1-home-day");
+        h.state_mut().cx.cmd(Cmd::Connect(shop_id));
+        settle(&mut h, |a| a.cx.conns.is_connected(shop_id), Duration::from_secs(10));
+        let sql = "-- Top customers\nSELECT c.name, c.country, count(*) AS orders, round(sum(o.total), 2) AS revenue\nFROM orders o JOIN customers c ON c.id = o.customer_id\nGROUP BY 1, 2 ORDER BY revenue DESC LIMIT 20;";
+        h.state_mut().cx.cmd(Cmd::NewSql { conn: shop_id, database: None, text: sql.into() });
+        std::thread::sleep(Duration::from_millis(400));
+        for _ in 0..10 {
+            h.step();
+        }
+        h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Enter);
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "c2-sql-day");
+        h.ctx.set_theme(egui::Theme::Dark);
+        shot(&mut h, &out, "c3-sql-night");
+        {
+            let cx = &h.state().cx;
+            let d = views::conn_dialog::ConnDialog::new(cx, None, None);
+            h.state_mut().cx.conn_dialog = Some(d);
+        }
+        shot(&mut h, &out, "c4-picker-night");
+        h.ctx.set_theme(egui::Theme::Light);
+        shot(&mut h, &out, "c5-picker-day");
+        h.state_mut().cx.conn_dialog = None;
+        h.state_mut().cx.show_settings = true;
+        shot(&mut h, &out, "c6-settings-day");
         drop(h);
         rt.shutdown_timeout(Duration::from_secs(1));
     }
