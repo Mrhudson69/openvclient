@@ -58,7 +58,7 @@ fn key() -> Option<[u8; 32]> {
             }
         }
         let mut k = [0u8; 32];
-        getrandom::getrandom(&mut k).ok()?;
+        getrandom::fill(&mut k).ok()?;
         match entry.set_password(&b64().encode(k)) {
             Ok(()) => Some(k),
             Err(e) => {
@@ -79,10 +79,10 @@ pub fn seal(plain: &str) -> String {
     let Some(k) = key() else { return plain.to_string() };
     let cipher = Aes256Gcm::new(&k.into());
     let mut nonce = [0u8; 12];
-    if getrandom::getrandom(&mut nonce).is_err() {
+    if getrandom::fill(&mut nonce).is_err() {
         return plain.to_string();
     }
-    match cipher.encrypt(Nonce::from_slice(&nonce), plain.as_bytes()) {
+    match cipher.encrypt(&Nonce::from(nonce), plain.as_bytes()) {
         Ok(ct) => {
             let mut blob = nonce.to_vec();
             blob.extend_from_slice(&ct);
@@ -102,7 +102,8 @@ pub fn open(s: &str) -> Option<String> {
         return None;
     }
     let (nonce, ct) = blob.split_at(12);
-    let pt = Aes256Gcm::new(&k.into()).decrypt(Nonce::from_slice(nonce), ct).ok()?;
+    let nonce = Nonce::try_from(nonce).ok()?;
+    let pt = Aes256Gcm::new(&k.into()).decrypt(&nonce, ct).ok()?;
     String::from_utf8(pt).ok()
 }
 
@@ -115,6 +116,13 @@ pub fn param_has_secret(v: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A value sealed by the earlier aes-gcm 0.10 / getrandom 0.2 build (test key):
+    /// library upgrades must keep opening what users already have on disk.
+    #[test]
+    fn opens_values_sealed_by_earlier_versions() {
+        assert_eq!(open("ovc-sealed:v1:736DJ+BfpcA+4C0EVaIfPJ8APwhqNWV0vz6mro9CT+O/8Y0gwnIJAErjUjVUroBE1tCKQTVp6thOhRc=").as_deref(), Some("SELECT 'sealed by aes-gcm 0.10'"));
+    }
 
     #[test]
     fn roundtrip_when_store_available() {
