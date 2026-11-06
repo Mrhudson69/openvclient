@@ -54,8 +54,8 @@ rfd = "0.17"
 directories = "6"
 reqwest.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
-aes-gcm = "0.10"
-getrandom = "0.2"
+aes-gcm = "0.11"
+getrandom = "0.4"
 base64 = "0.23"
 csv = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
