@@ -8,6 +8,7 @@ APP=dist/OpenVClient.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/openvclient "$APP/Contents/MacOS/OpenVClient"
+cp assets/icon/openvclient.icns "$APP/Contents/Resources/OpenVClient.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -19,10 +20,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleExecutable</key><string>OpenVClient</string>
+  <key>CFBundleIconFile</key><string>OpenVClient</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>NSHumanReadableCopyright</key><string>© OpenVClient contributors · MIT OR Apache-2.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
 </dict>
 </plist>
 PLIST

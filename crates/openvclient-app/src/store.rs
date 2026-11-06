@@ -6,7 +6,7 @@ use openvclient_core::ConnectionProfile;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const KEYCHAIN_SERVICE: &str = "dev.openvclient.client";
+pub const KEYCHAIN_SERVICE: &str = "dev.openvclient.client";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeChoice {
@@ -112,6 +112,35 @@ pub fn config_dir() -> PathBuf {
     directories::ProjectDirs::from("dev", "OpenVClient", "OpenVClient").map(|d| d.config_dir().to_path_buf()).unwrap_or_else(|| PathBuf::from(".openvclient"))
 }
 
+/// Decrypt sealed values in place; returns how many could not be opened.
+fn unseal(ws: &mut Workspace) -> usize {
+    let mut lost = 0;
+    ws.history.retain_mut(|h| match crate::vault::open(&h.sql) {
+        Some(s) => {
+            h.sql = s;
+            true
+        }
+        None => {
+            lost += 1;
+            false
+        }
+    });
+    for p in &mut ws.profiles {
+        for v in p.params.values_mut() {
+            if crate::vault::is_sealed(v) {
+                match crate::vault::open(v) {
+                    Some(s) => *v = s,
+                    None => {
+                        lost += 1;
+                        v.clear();
+                    }
+                }
+            }
+        }
+    }
+    lost
+}
+
 impl Store {
     pub fn load() -> Self {
         let path = config_dir().join("workspace.json");
@@ -125,8 +154,13 @@ impl Store {
             let _ = std::fs::copy(&old, &path);
         }
         let (ws, load_error) = match std::fs::read(&path) {
-            Ok(bytes) => match serde_json::from_slice(&bytes) {
-                Ok(ws) => (ws, None),
+            Ok(bytes) => match serde_json::from_slice::<Workspace>(&bytes) {
+                Ok(mut ws) => {
+                    let lost = unseal(&mut ws);
+                    let warn =
+                        (lost > 0).then(|| format!("{lost} encrypted item(s) in the workspace could not be decrypted (the key in the system keychain is missing or different) and were left out."));
+                    (ws, warn)
+                }
                 Err(e) => {
                     // Keep the unreadable file so nothing is lost.
                     let backup = path.with_extension(format!("broken-{}.json", chrono::Utc::now().timestamp()));
@@ -145,7 +179,19 @@ impl Store {
         let dir = self.path.parent().ok_or("bad config path")?;
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let tmp = self.path.with_extension("json.tmp");
-        let data = serde_json::to_vec_pretty(&self.ws).map_err(|e| e.to_string())?;
+        // History and URIs with embedded passwords are encrypted at rest.
+        let mut disk = self.ws.clone();
+        for h in &mut disk.history {
+            h.sql = crate::vault::seal(&h.sql);
+        }
+        for p in &mut disk.profiles {
+            for v in p.params.values_mut() {
+                if crate::vault::param_has_secret(v) {
+                    *v = crate::vault::seal(v);
+                }
+            }
+        }
+        let data = serde_json::to_vec_pretty(&disk).map_err(|e| e.to_string())?;
         std::fs::write(&tmp, data).map_err(|e| e.to_string())?;
         restrict(&tmp);
         std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())

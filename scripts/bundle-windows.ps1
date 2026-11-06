@@ -8,7 +8,10 @@
 # $env:WINDOWS_CERTIFICATE_PASSWORD are set, openvclient.exe is Authenticode-signed
 # with signtool before zipping. Otherwise the binary is left unsigned.
 #
-# Output: dist\OpenVClient-<version>-windows-<arch>.zip
+# Output: dist\OpenVClient-<version>-windows-<arch>-setup.exe (Inno Setup wizard)
+#         dist\OpenVClient-<version>-windows-<arch>.zip      (portable)
+# The installer needs Inno Setup 6 (winget install JRSoftware.InnoSetup);
+# without it only the portable zip is built.
 [CmdletBinding()]
 param(
     [string]$Target = "x86_64-pc-windows-msvc",
@@ -55,3 +58,29 @@ if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip
 Remove-Item $stage -Recurse -Force
 Write-Host "Built $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)"
+
+# Installer: Inno Setup wizard (Welcome, License, scope, folder, shortcuts, Finish).
+$iscc = @(
+    (Get-Command iscc.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if ($iscc) {
+    $innoArch = if ($arch -eq "aarch64") { "arm64" } else { "x64" }
+    $exeFull = (Resolve-Path $exe).Path
+    $outDir = (Resolve-Path dist).Path
+    & $iscc /Qp "/DAppVersion=$version" "/DSourceExe=$exeFull" "/DArch=$innoArch" "/DOutputDir=$outDir" installer\windows\openvclient.iss
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+    $setup = "dist\OpenVClient-$version-windows-$innoArch-setup.exe"
+    if ($env:WINDOWS_CERTIFICATE -and $env:WINDOWS_CERTIFICATE_PASSWORD -and $signtool) {
+        [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+        & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "OpenVClient Setup" $setup
+        Remove-Item $pfx -Force
+    }
+    Get-FileHash $setup -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $setup -Leaf)" } | Set-Content "$setup.sha256"
+    Write-Host "Built $setup ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)"
+} else {
+    Write-Warning "Inno Setup 6 not found: skipped the installer. Install it with 'winget install JRSoftware.InnoSetup' and run again."
+}
+

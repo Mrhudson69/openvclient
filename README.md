@@ -119,7 +119,19 @@ Named instances (for example `SQLEXPRESS`) are resolved through **SQL Server Bro
 
 ## Install
 
-There are no pre-built binaries yet. See [docs/RELEASE_PLAN.md](docs/RELEASE_PLAN.md) for the plan. Until then, build from source.
+Installers are produced by the release workflow (see [docs/RELEASE_PLAN.md](docs/RELEASE_PLAN.md)); you can also build them yourself:
+
+| Platform | Command | Result |
+|----------|---------|--------|
+| macOS | `./scripts/package-macos-dmg.sh` | `dist/OpenVClient-<version>-macos-<arch>.dmg`: open it and drag OpenVClient onto Applications |
+| Windows | `.\scripts\bundle-windows.ps1` (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)) | `dist\OpenVClient-<version>-windows-x64-setup.exe`: a setup wizard (licence, per-user or all users, folder, shortcuts, launch) plus a portable zip |
+| Linux | `./scripts/bundle-linux.sh` | `.deb`, `.rpm`, AppImage and a tar.gz with `install.sh`; all add a menu entry and icon |
+
+Builds that are not signed with an Apple Developer ID / Windows code-signing certificate show a first-run warning (macOS: right-click → Open; Windows SmartScreen: More info → Run anyway). The release workflow signs and notarizes when the signing secrets are configured.
+
+Building on a fresh Windows or Linux machine with Claude Code: see [docs/WINDOWS_BUILD_PROMPT.md](docs/WINDOWS_BUILD_PROMPT.md) and [docs/LINUX_BUILD_PROMPT.md](docs/LINUX_BUILD_PROMPT.md).
+
+To build from source:
 
 ### Prerequisites (all platforms)
 - **Rust 1.95 or newer** (edition 2024). Install it with [rustup](https://rustup.rs).
@@ -133,6 +145,7 @@ git clone https://github.com/Mrhudson69/openvclient.git
 cd openvclient
 cargo run --release             # or build the app bundle:
 ./scripts/bundle-macos.sh       # -> dist/OpenVClient.app (ad-hoc signed)
+./scripts/package-macos-dmg.sh  # -> drag-to-Applications .dmg
 ```
 OpenVClient needs macOS 11 or later. TLS for PostgreSQL, MySQL and Redis uses the system Security framework.
 
@@ -144,7 +157,7 @@ OpenVClient needs macOS 11 or later. TLS for PostgreSQL, MySQL and Redis uses th
    git clone https://github.com/Mrhudson69/openvclient.git
    cd openvclient
    cargo run --release
-   # or: .\scripts\bundle-windows.ps1   -> dist\OpenVClient-<version>-windows-x86_64.zip
+   # or: .\scripts\bundle-windows.ps1   -> setup.exe installer + portable zip in dist\
    ```
 Windows builds are the only builds that support SQL Server `windows` and `integrated` authentication (SSPI). TLS uses SChannel.
 
@@ -216,7 +229,8 @@ Logs go to stderr and to `<config dir>/logs/openvclient.log`. The file is rotate
 ## Security model
 
 - **Secrets stay in the OS keychain.** This is macOS Keychain, Windows Credential Manager or the Linux Secret Service. Entries use the service name `dev.openvclient.client`, keyed by the profile id. `workspace.json` holds no passwords, tokens or passphrases. SSH passwords, key passphrases and proxy passwords are stored the same way.
-- **SSH host keys are trusted on first use (TOFU).** The SHA-256 fingerprint seen on the first successful connection is saved in the profile. If the key is different on a later connection, the connection is refused and the app explains why. Check the new key with the server's administrator before you trust it.
+- **SSH host keys are never trusted silently.** A key listed in `~/.ssh/known_hosts` is accepted; any other new key is shown with its SHA-256 fingerprint and only trusted when you confirm it, then pinned in the profile. A key that changes later is refused with an explanation.
+- **Workspace data at rest:** SQL history and connection URIs with embedded passwords are encrypted (AES-256-GCM) in `workspace.json`, with the key held in the system keychain; the file is owner-only on macOS/Linux.
 - **TLS.** SQL Server uses rustls. Encryption is on by default; `required` also verifies the certificate. PostgreSQL, MySQL and Redis use the platform TLS stack, with each engine's usual SSL modes.
 - **Safety rails.** Destructive actions ask for confirmation. Profiles tagged *production* can require you to type the connection name. Read-only profiles refuse changes.
 - **No telemetry.** OpenVClient makes no network connections except to the servers you configure, plus Microsoft Entra ID endpoints when you choose an Entra auth method. There is no auto-update or analytics.

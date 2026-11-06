@@ -46,21 +46,23 @@ async fn ssh_tunnel_password_key_and_pinning() {
         return;
     }
     let spec = |auth, fp: Option<String>| ProxySpec::Ssh { host: "127.0.0.1".into(), port: 52222, user: "tunnel".into(), auth, known_fingerprint: fp, timeout: Duration::from_secs(10) };
-    let t = Tunnel::open(spec(SshAuth::Password("tunnelpw".into()), None), "redis", 6379).await.unwrap();
-    assert_eq!(ping_redis(t.local).await, "+PONG");
-    let fp = t.fingerprint.clone().unwrap();
+    // An unknown key is not trusted silently: the error carries the fingerprint for the user to confirm.
+    let e = Tunnel::open(spec(SshAuth::Password("tunnelpw".into()), None), "redis", 6379).await.err().expect("unknown key must be refused");
+    let fp = unknown_host_key(&e).expect("fingerprint in the error");
     assert!(fp.starts_with("SHA256:"), "{fp}");
 
-    // Pinned key accepted; a different pin is refused.
-    Tunnel::open(spec(SshAuth::Password("tunnelpw".into()), Some(fp)), "redis", 6379).await.unwrap();
+    // After the user trusts it, the pinned key is accepted; a different pin is refused.
+    let t = Tunnel::open(spec(SshAuth::Password("tunnelpw".into()), Some(fp.clone())), "redis", 6379).await.unwrap();
+    assert_eq!(ping_redis(t.local).await, "+PONG");
+    assert_eq!(t.fingerprint.as_deref(), Some(fp.as_str()));
     let e = Tunnel::open(spec(SshAuth::Password("tunnelpw".into()), Some("SHA256:not-the-key".into())), "redis", 6379).await.err().unwrap();
     assert!(e.message.contains("host key"), "{e}");
 
-    let e = Tunnel::open(spec(SshAuth::Password("nope".into()), None), "redis", 6379).await.err().unwrap();
+    let e = Tunnel::open(spec(SshAuth::Password("nope".into()), Some(fp.clone())), "redis", 6379).await.err().unwrap();
     assert_eq!(e.kind, openvclient_core::ErrorKind::Auth, "{e}");
 
     if let Ok(key) = std::env::var("OPENVCLIENT_TEST_SSH_KEY") {
-        let t = Tunnel::open(spec(SshAuth::Key { path: key.into(), passphrase: None }, None), "redis", 6379).await.unwrap();
+        let t = Tunnel::open(spec(SshAuth::Key { path: key.into(), passphrase: None }, Some(fp.clone())), "redis", 6379).await.unwrap();
         assert_eq!(ping_redis(t.local).await, "+PONG");
     }
 }

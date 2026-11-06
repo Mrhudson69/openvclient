@@ -83,6 +83,15 @@ pub enum CatalogState {
     Failed,
 }
 
+/// An SSH server key waiting for the user's decision.
+pub struct HostKeyPrompt {
+    pub conn: Uuid,
+    pub host: String,
+    pub fingerprint: String,
+    /// Profile parameter that pins it.
+    pub param: &'static str,
+}
+
 #[derive(Default)]
 pub struct UpdateState {
     job: Option<crate::bg::Job<openvclient_core::Result<Option<crate::update::Release>>>>,
@@ -117,6 +126,7 @@ pub struct AppCtx {
     pub confirm: Option<Confirm>,
     pub palette: views::palette::Palette,
     pub password_prompt: Option<(Uuid, String)>,
+    pub host_key_prompt: Option<HostKeyPrompt>,
     pub update: UpdateState,
     pub selected_conn: Option<Uuid>,
     pub next_tab: u64,
@@ -403,6 +413,7 @@ impl OpenvApp {
             confirm: None,
             palette: Default::default(),
             password_prompt: None,
+            host_key_prompt: None,
             update: UpdateState::default(),
             selected_conn: None,
             next_tab: 1,
@@ -589,7 +600,12 @@ impl OpenvApp {
                 }
                 ConnEvent::Failed(id, e) => {
                     let name = self.cx.profile_name(id);
-                    if e.kind != openvclient_core::ErrorKind::Cancelled {
+                    if let Some(fp) = openvclient_net::unknown_host_key(&e) {
+                        // Ask before trusting a server key we have never seen.
+                        let jump = e.message.contains("(jump host)");
+                        let host = e.message.split(" for ").nth(1).and_then(|r| r.split(". ").next()).map(str::to_owned).unwrap_or_else(|| e.message.rsplit(' ').next().unwrap_or("").to_string());
+                        self.cx.host_key_prompt = Some(HostKeyPrompt { conn: id, host, fingerprint: fp, param: if jump { "jump_fingerprint" } else { openvclient_net::keys::SSH_FINGERPRINT } });
+                    } else if e.kind != openvclient_core::ErrorKind::Cancelled {
                         self.cx.toasts.error(format!("Could not connect to {name}"), &e);
                     }
                 }
@@ -760,6 +776,58 @@ impl OpenvApp {
         });
     }
 
+    fn host_key_prompt(&mut self, ctx: &egui::Context) {
+        let Some(p) = self.cx.host_key_prompt.take() else { return };
+        let name = self.cx.profile_name(p.conn);
+        let (mut keep, mut trust) = (true, false);
+        egui::Modal::new(egui::Id::unique("host_key_prompt")).show(ctx, |ui| {
+            ui.set_width(560.0_f32.min(ctx.content_rect().width() - 48.0));
+            let t = theme::tokens(ui);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(String::from(ICON_GPP_MAYBE)).size(theme::icon::LG).color(t.warning));
+                ui.heading("Trust this SSH server?");
+            });
+            ui.add_space(theme::space::SM);
+            ui.add(egui::Label::new(format!("{name} is connecting to {} for the first time. Its identity is not in ~/.ssh/known_hosts and has not been trusted before.", p.host)).wrap());
+            ui.add_space(theme::space::SM);
+            egui::Frame::new().fill(t.muted).corner_radius(6.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+                ui.label(RichText::new("Host key fingerprint (SHA-256)").small().color(t.muted_fg));
+                ui.horizontal(|ui| {
+                    ui.add(egui::Label::new(RichText::new(&p.fingerprint).monospace().strong()).wrap());
+                    if ui.small_button(String::from(ICON_CONTENT_COPY)).on_hover_text("Copy fingerprint").clicked() {
+                        ui.ctx().copy_text(p.fingerprint.clone());
+                    }
+                });
+            });
+            ui.add_space(theme::space::SM);
+            ui.add(egui::Label::new(RichText::new("Compare it with the fingerprint from the server's administrator (for example `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server). If they differ, someone may be intercepting the connection.").color(t.muted_fg)).wrap());
+            ui.add_space(theme::space::MD);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    keep = false;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::primary_button(ui, ico(ICON_VERIFIED_USER, "Trust and connect")).clicked() {
+                        trust = true;
+                    }
+                });
+            });
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                keep = false;
+            }
+        });
+        if trust {
+            if let Some(prof) = self.cx.store.profile_mut(p.conn) {
+                prof.params.insert(p.param.to_string(), p.fingerprint.clone());
+            }
+            self.cx.mark_dirty();
+            tracing::info!(target: "openvclient::conn", name = %name, host = %p.host, fingerprint = %p.fingerprint, "SSH host key trusted by the user");
+            self.connect(p.conn);
+        } else if keep {
+            self.cx.host_key_prompt = Some(p);
+        }
+    }
+
     fn password_prompt(&mut self, ctx: &egui::Context) {
         let Some((id, mut pw)) = self.cx.password_prompt.take() else { return };
         let name = self.cx.profile_name(id);
@@ -842,7 +910,7 @@ impl OpenvApp {
         let mut check_now = false;
         let before = self.cx.store.ws.settings.clone();
         egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
-            ui.set_width(520.0);
+            ui.set_width(640.0_f32.min(ctx.content_rect().width() - 48.0));
             let t = theme::tokens(ui);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(String::from(ICON_SETTINGS)).size(theme::icon::LG).color(t.accent));
@@ -855,72 +923,76 @@ impl OpenvApp {
             });
             ui.separator();
             ui.add_space(theme::space::SM);
-            let s = &mut self.cx.store.ws.settings;
-            let label_w = 170.0;
-            let row = |ui: &mut egui::Ui, label: &str, hint: &str, body: &mut dyn FnMut(&mut egui::Ui)| {
-                ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(egui::vec2(label_w, 28.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.set_min_width(label_w);
-                        let r = ui.label(label);
-                        if !hint.is_empty() {
-                            r.on_hover_text(hint);
-                        }
+            let max_h = (ctx.content_rect().height() * 0.88 - 90.0).max(240.0);
+            egui::ScrollArea::vertical().max_height(max_h).min_scrolled_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+                let s = &mut self.cx.store.ws.settings;
+                let label_w = 170.0;
+                let row = |ui: &mut egui::Ui, label: &str, hint: &str, body: &mut dyn FnMut(&mut egui::Ui)| {
+                    ui.horizontal(|ui| {
+                        ui.allocate_ui_with_layout(egui::vec2(label_w, 28.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.set_min_width(label_w);
+                            let r = ui.label(label);
+                            if !hint.is_empty() {
+                                r.on_hover_text(hint);
+                            }
+                        });
+                        body(ui);
                     });
-                    body(ui);
-                });
-                ui.add_space(theme::space::XS);
-            };
-            ui.label(RichText::new("APPEARANCE").small().strong().color(t.muted_fg));
-            row(ui, "Theme", "", &mut |ui| {
-                for (v, l) in [(ThemeChoice::System, "System"), (ThemeChoice::Dark, "Dark"), (ThemeChoice::Light, "Light")] {
-                    if ui.selectable_value(&mut s.theme, v, l).clicked() {
-                        apply_theme(ui.ctx(), v);
+                    ui.add_space(theme::space::XS);
+                };
+                ui.label(RichText::new("APPEARANCE").small().strong().color(t.muted_fg));
+                row(ui, "Theme", "", &mut |ui| {
+                    for (v, l) in [(ThemeChoice::System, "System"), (ThemeChoice::Dark, "Dark"), (ThemeChoice::Light, "Light")] {
+                        if ui.selectable_value(&mut s.theme, v, l).clicked() {
+                            apply_theme(ui.ctx(), v);
+                        }
                     }
-                }
-            });
-            row(ui, "Editor font size", "SQL editor and DDL views", &mut |ui| {
-                ui.spacing_mut().slider_width = 220.0;
-                ui.add(egui::Slider::new(&mut s.editor_font_size, 10.0..=22.0).step_by(0.5).fixed_decimals(1).suffix(" px"));
-            });
-            row(ui, "Updates", "Check GitHub for a newer release at startup", &mut |ui| {
-                ui.checkbox(&mut s.check_updates, "Check automatically");
-                if ui.button("Check now").clicked() {
-                    check_now = true;
-                }
-            });
-            row(ui, "Scroll speed", "Multiplier for mouse wheel and trackpad scrolling", &mut |ui| {
-                ui.spacing_mut().slider_width = 220.0;
-                ui.add(egui::Slider::new(&mut s.scroll_speed, 0.2..=2.0).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
-            });
-            ui.add_space(theme::space::SM);
-            ui.label(RichText::new("DATA").small().strong().color(t.muted_fg));
-            row(ui, "Max rows per result", "Rows kept per SQL result; the rest are counted, not stored", &mut |ui| {
-                ui.add(egui::DragValue::new(&mut s.max_rows).range(100..=1_000_000).speed(100));
-            });
-            row(ui, "Table page size", "Rows per page in the table browser", &mut |ui| {
-                ui.add(egui::DragValue::new(&mut s.page_size).range(10..=10_000).speed(10));
-            });
-            ui.add_space(theme::space::SM);
-            ui.label(RichText::new("SAFETY").small().strong().color(t.muted_fg));
-            row(ui, "Production", "", &mut |ui| {
-                ui.checkbox(&mut s.confirm_production, "Type the name to confirm destructive actions");
-            });
-            ui.add_space(theme::space::SM);
-            ui.separator();
-            ui.label(RichText::new(format!("Workspace file: {}", crate::store::config_dir().join("workspace.json").display())).small().color(t.muted_fg));
-            ui.horizontal(|ui| {
+                });
+                row(ui, "Editor font size", "SQL editor and DDL views", &mut |ui| {
+                    ui.spacing_mut().slider_width = 220.0;
+                    ui.add(egui::Slider::new(&mut s.editor_font_size, 10.0..=22.0).step_by(0.5).fixed_decimals(1).suffix(" px"));
+                });
+                row(ui, "Updates", "Check GitHub for a newer release at startup", &mut |ui| {
+                    ui.checkbox(&mut s.check_updates, "Check automatically");
+                    if ui.button("Check now").clicked() {
+                        check_now = true;
+                    }
+                });
+                row(ui, "Scroll speed", "Multiplier for mouse wheel and trackpad scrolling", &mut |ui| {
+                    ui.spacing_mut().slider_width = 220.0;
+                    ui.add(egui::Slider::new(&mut s.scroll_speed, 0.2..=2.0).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
+                });
+                ui.add_space(theme::space::SM);
+                ui.label(RichText::new("DATA").small().strong().color(t.muted_fg));
+                row(ui, "Max rows per result", "Rows kept per SQL result; the rest are counted, not stored", &mut |ui| {
+                    ui.add(egui::DragValue::new(&mut s.max_rows).range(100..=1_000_000).speed(100));
+                });
+                row(ui, "Table page size", "Rows per page in the table browser", &mut |ui| {
+                    ui.add(egui::DragValue::new(&mut s.page_size).range(10..=10_000).speed(10));
+                });
+                ui.add_space(theme::space::SM);
+                ui.label(RichText::new("SAFETY").small().strong().color(t.muted_fg));
+                row(ui, "Production", "", &mut |ui| {
+                    ui.checkbox(&mut s.confirm_production, "Type the name to confirm destructive actions");
+                });
+                ui.add_space(theme::space::SM);
+                ui.separator();
+                // Paths wrap inside the dialog instead of widening it.
+                ui.add(egui::Label::new(RichText::new(format!("Workspace file: {}", crate::store::config_dir().join("workspace.json").display())).small().color(t.muted_fg)).wrap());
                 let logs = crate::store::config_dir().join("logs");
-                ui.label(RichText::new(format!("Logs: {}", logs.display())).small().color(t.muted_fg));
-                if ui.small_button("Open logs folder").clicked() {
-                    let opener = if cfg!(target_os = "macos") {
-                        "open"
-                    } else if cfg!(windows) {
-                        "explorer"
-                    } else {
-                        "xdg-open"
-                    };
-                    let _ = std::process::Command::new(opener).arg(&logs).spawn();
-                }
+                ui.add(egui::Label::new(RichText::new(format!("Logs: {}", logs.display())).small().color(t.muted_fg)).wrap());
+                ui.horizontal(|ui| {
+                    if ui.small_button(ico(ICON_FOLDER_OPEN, "Open logs folder")).clicked() {
+                        let opener = if cfg!(target_os = "macos") {
+                            "open"
+                        } else if cfg!(windows) {
+                            "explorer"
+                        } else {
+                            "xdg-open"
+                        };
+                        let _ = std::process::Command::new(opener).arg(&logs).spawn();
+                    }
+                });
             });
             if ui.input(|i| i.key_pressed(Key::Escape)) {
                 close = true;
@@ -1067,6 +1139,7 @@ impl eframe::App for OpenvApp {
             }
         }
         self.password_prompt(&ctx);
+        self.host_key_prompt(&ctx);
         self.confirm_dialog(&ctx);
         self.settings_window(&ctx);
         let tabs: Vec<(u64, String)> = self.tree.tiles.tiles().filter_map(|t| if let Tile::Pane(p) = t { Some((p.id, p.title(&self.cx))) } else { None }).collect();

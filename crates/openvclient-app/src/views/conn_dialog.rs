@@ -139,7 +139,9 @@ impl ConnDialog {
         }
         let title = if self.is_new { "New connection" } else { "Edit connection" };
         egui::Modal::new(egui::Id::unique("conn_dialog")).show(ctx, |ui| {
-            ui.set_width(if self.picking { 780.0 } else { 660.0 });
+            // Large enough that most forms fit without scrolling, never wider than the window.
+            let screen = ctx.content_rect();
+            ui.set_width((if self.picking { 900.0_f32 } else { 820.0 }).min(screen.width() - 48.0));
             ui.horizontal(|ui| {
                 ui.heading(title);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -150,8 +152,8 @@ impl ConnDialog {
             });
             ui.separator();
             // Header and close button stay put; the body scrolls when the window is short.
-            let max_h = (ctx.content_rect().height() * 0.75).max(240.0);
-            egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+            let max_h = (screen.height() * 0.88 - 110.0).max(240.0);
+            egui::ScrollArea::vertical().max_height(max_h).min_scrolled_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
                 if self.picking {
                     self.picker(ui, cx);
                 } else {
@@ -313,7 +315,23 @@ impl ConnDialog {
             Some(Ok(m)) => {
                 ui.label(RichText::new(ico(ICON_CHECK, m)).color(t.accent));
             }
-            Some(Err(e)) => crate::views::error_box(ui, e),
+            Some(Err(e)) => {
+                crate::views::error_box(ui, e);
+                if let Some(fp) = openvclient_net::unknown_host_key(e) {
+                    let param = if e.message.contains("(jump host)") { "jump_fingerprint" } else { openvclient_net::keys::SSH_FINGERPRINT };
+                    let t = theme::tokens(ui);
+                    egui::Frame::new().fill(t.muted).corner_radius(6.0).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+                        ui.label(RichText::new("Host key fingerprint (SHA-256) — compare it with the one from the server's administrator").small().color(t.muted_fg));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&fp).monospace().strong());
+                            if ui.button(ico(ICON_VERIFIED_USER, "Trust this key")).clicked() {
+                                self.p.params.insert(param.to_string(), fp.clone());
+                                self.test_result = None;
+                            }
+                        });
+                    });
+                }
+            }
             None => {}
         }
         ui.add_space(theme::space::SM);

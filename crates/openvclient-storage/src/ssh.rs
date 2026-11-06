@@ -15,6 +15,10 @@ use russh_sftp::client::SftpSession;
 const PREVIEW_MAX: u64 = 1024 * 1024;
 /// Profile key holding the pinned host key (shared with SSH tunnels).
 pub const FINGERPRINT: &str = openvclient_net::keys::SSH_FINGERPRINT;
+/// Pinned host key of the jump host.
+pub const JUMP_FINGERPRINT: &str = "jump_fingerprint";
+/// Marks an unknown-key error as coming from the jump host.
+pub const JUMP_MARK: &str = "(jump host)";
 
 pub struct SshDriver {
     info: DriverInfo,
@@ -98,9 +102,16 @@ impl Driver for SshDriver {
                     port: p.get("jump_port").and_then(|v| v.parse().ok()).unwrap_or(22),
                     user: p.get("jump_user").unwrap_or(&user).to_string(),
                     auth: jauth,
-                    expected: None,
+                    expected: p.get(JUMP_FINGERPRINT).map(str::to_owned),
                 };
-                let (j, _) = ssh_connect_via(None, &jt, timeout).await.map_err(|e| Error { message: format!("Jump host {jh}: {}", e.message), ..e })?;
+                let (j, _) = ssh_connect_via(None, &jt, timeout).await.map_err(|e| {
+                    if openvclient_net::unknown_host_key(&e).is_some() {
+                        // Same prefix, marked so the app pins it as the jump host's key.
+                        Error { message: format!("{} {JUMP_MARK} {jh}", openvclient_net::UNKNOWN_HOST_KEY), ..e }
+                    } else {
+                        Error { message: format!("Jump host {jh}: {}", e.message), ..e }
+                    }
+                })?;
                 let inner = ssh_connect_via(Some(&j), &target, timeout).await?;
                 (Some(Arc::new(j)), inner)
             }
@@ -430,6 +441,22 @@ impl ResourceSession for SshSession {
     }
 }
 
+/// Test helper: connect once to learn the (unknown) host key, then pin it,
+/// the way the UI does after the user confirms it.
+#[cfg(test)]
+pub(crate) async fn trust_for_test(mut p: ConnectParams) -> std::result::Result<ConnectParams, Error> {
+    match SshDriver::default().connect(p.clone()).await {
+        Ok(_) => Ok(p),
+        Err(e) => match openvclient_net::unknown_host_key(&e) {
+            Some(fp) => {
+                p.values.insert(FINGERPRINT.into(), fp);
+                Ok(p)
+            }
+            None => Err(e),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,7 +475,14 @@ mod tests {
         v.insert("user".into(), std::env::var("OPENVCLIENT_TEST_SSH_USER").unwrap_or_else(|_| "tunnel".into()));
         v.insert("auth".into(), "password".into());
         let secret = Some(std::env::var("OPENVCLIENT_TEST_SSH_PASSWORD").unwrap_or_else(|_| "tunnelpw".into()));
-        let h = match SshDriver::default().connect(ConnectParams { values: v, secret, read_only: false, notifier: None }).await {
+        let p = match super::trust_for_test(ConnectParams { values: v, secret, read_only: false, notifier: None }).await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("skipping: no SSH server ({e})");
+                return;
+            }
+        };
+        let h = match SshDriver::default().connect(p).await {
             Ok(h) => h,
             Err(e) => {
                 eprintln!("skipping: no SSH server ({e})");
@@ -503,13 +537,23 @@ mod auth_tests {
     #[tokio::test]
     async fn keyboard_interactive_and_jump_host() {
         let p = |v, secret: Option<&str>| ConnectParams { values: v, secret: secret.map(str::to_owned), read_only: false, notifier: None };
-        match SshDriver::default().connect(p(base("password"), Some("tunnelpw"))).await {
-            Ok(_) => {}
+        let fp = match super::trust_for_test(p(base("password"), Some("tunnelpw"))).await {
+            Ok(t) => t.values.get(FINGERPRINT).cloned().unwrap_or_default(),
             Err(e) => {
                 eprintln!("skipping: no SSH server ({e})");
                 return;
             }
-        }
+        };
+        let base = |auth: &str| {
+            let mut v = base(auth);
+            v.insert(FINGERPRINT.into(), fp.clone());
+            v
+        };
+        // Without a pinned key the server is not trusted.
+        let mut fresh = base("password");
+        fresh.remove(FINGERPRINT);
+        let e = SshDriver::default().connect(p(fresh, Some("tunnelpw"))).await.err().expect("unknown key refused");
+        assert!(openvclient_net::unknown_host_key(&e).is_some(), "{e}");
         // Keyboard-interactive answers the password prompt (servers without it fail cleanly).
         match SshDriver::default().connect(p(base("keyboard_interactive"), Some("tunnelpw"))).await {
             Ok(_) => eprintln!("keyboard-interactive ok"),

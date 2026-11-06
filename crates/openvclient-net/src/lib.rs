@@ -286,6 +286,16 @@ pub async fn dial_via_proxy(spec: &ProxySpec, host: &str, port: u16) -> Result<T
     tokio::time::timeout(timeout, fut).await.map_err(|_| Error::connection(format!("Timed out connecting through {}", spec.label())))?
 }
 
+/// Message prefix of the error returned for a server key that is neither in
+/// `~/.ssh/known_hosts` nor pinned yet. The error's detail is the SHA-256
+/// fingerprint; the UI asks the user and retries with it pinned.
+pub const UNKNOWN_HOST_KEY: &str = "Unknown SSH host key";
+
+/// The fingerprint from an [`UNKNOWN_HOST_KEY`] error, if it is one.
+pub fn unknown_host_key(e: &openvclient_core::Error) -> Option<String> {
+    e.message.starts_with(UNKNOWN_HOST_KEY).then(|| e.detail.clone()).flatten()
+}
+
 pub struct HostKeyCheck {
     host: String,
     port: u16,
@@ -293,6 +303,8 @@ pub struct HostKeyCheck {
     seen: Arc<std::sync::Mutex<Option<String>>>,
     /// Set when ~/.ssh/known_hosts lists this host with a different key.
     known_hosts_mismatch: Arc<std::sync::atomic::AtomicBool>,
+    /// Set when the key is new: not in known_hosts and nothing pinned.
+    unknown: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl client::Handler for HostKeyCheck {
@@ -310,8 +322,14 @@ impl client::Handler for HostKeyCheck {
             }
             _ => {}
         }
-        // 2. Otherwise trust on first use; afterwards the pinned key must match.
-        Ok(self.expected.as_ref().is_none_or(|e| e == &fp))
+        // 2. Otherwise only the key the user confirmed (pinned) is accepted.
+        match &self.expected {
+            Some(e) => Ok(e == &fp),
+            None => {
+                self.unknown.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(false)
+            }
+        }
     }
 }
 
@@ -337,7 +355,8 @@ pub async fn ssh_connect_via(jump: Option<&client::Handle<HostKeyCheck>>, t: &Ss
     let config = Arc::new(client::Config { inactivity_timeout: None, keepalive_interval: Some(Duration::from_secs(30)), ..Default::default() });
     let seen = Arc::new(std::sync::Mutex::new(None));
     let mismatch = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let handler = HostKeyCheck { host: t.host.clone(), port: t.port, expected: t.expected.clone(), seen: seen.clone(), known_hosts_mismatch: mismatch.clone() };
+    let unknown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let handler = HostKeyCheck { host: t.host.clone(), port: t.port, expected: t.expected.clone(), seen: seen.clone(), known_hosts_mismatch: mismatch.clone(), unknown: unknown.clone() };
     let (host, port) = (t.host.as_str(), t.port);
     let connect = async {
         match jump {
@@ -352,6 +371,9 @@ pub async fn ssh_connect_via(jump: Option<&client::Handle<HostKeyCheck>>, t: &Ss
         Err(_) => return Err(Error::connection(format!("Timed out connecting to SSH {host}:{port}"))),
         Ok(Err(e)) => {
             let fp = seen.lock().unwrap().clone();
+            if unknown.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(Error::auth(format!("{UNKNOWN_HOST_KEY} for {host}:{port}. Check the fingerprint with the server's administrator before trusting it.")).with_detail(fp.unwrap_or_default()));
+            }
             if mismatch.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err(Error::auth(format!(
                     "SSH host key for {host} does not match ~/.ssh/known_hosts (got {}). This can mean a man-in-the-middle attack; if the server was rebuilt, update known_hosts (ssh-keygen -R {host}).",

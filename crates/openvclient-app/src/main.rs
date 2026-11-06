@@ -7,6 +7,7 @@ mod export;
 mod store;
 mod theme;
 mod update;
+mod vault;
 mod views;
 mod widgets;
 
@@ -76,8 +77,14 @@ fn main() -> eframe::Result<()> {
     init_logging();
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(4).thread_name("openvclient-io").enable_all().build().expect("tokio runtime");
     let handle = rt.handle().clone();
-    let options =
-        eframe::NativeOptions { viewport: egui::ViewportBuilder::default().with_title("OpenVClient").with_inner_size([1440.0, 900.0]).with_min_inner_size([900.0, 560.0]), ..Default::default() };
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("OpenVClient")
+            .with_inner_size([1440.0, 900.0])
+            .with_min_inner_size([1100.0, 700.0])
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon/openvclient-256.png")).unwrap_or_default()),
+        ..Default::default()
+    };
     let result = eframe::run_native(
         "OpenVClient",
         options,

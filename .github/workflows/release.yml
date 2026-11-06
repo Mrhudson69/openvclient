@@ -70,7 +70,7 @@ jobs:
             target/aarch64-apple-darwin/release/openvclient \
             target/x86_64-apple-darwin/release/openvclient
           lipo -archs "$APP/Contents/MacOS/OpenVClient"
-          [ -f assets/OpenVClient.icns ] && cp assets/OpenVClient.icns "$APP/Contents/Resources/"
+          cp assets/icon/openvclient.icns "$APP/Contents/Resources/OpenVClient.icns"
           cat > "$APP/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -83,6 +83,8 @@ jobs:
             <key>CFBundleShortVersionString</key><string>${VERSION}</string>
             <key>CFBundleExecutable</key><string>OpenVClient</string>
             <key>CFBundleIconFile</key><string>OpenVClient</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>NSHumanReadableCopyright</key><string>© OpenVClient contributors · MIT OR Apache-2.0</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
             <key>NSHighResolutionCapable</key><true/>
@@ -112,13 +114,12 @@ jobs:
         run: codesign --force --deep --sign - dist/OpenVClient.app
       - name: Verify signature
         run: codesign --verify --deep --strict --verbose=2 dist/OpenVClient.app
-      - name: Build .dmg and .zip
+      - name: Build drag-to-Applications .dmg and .zip
         run: |
-          mkdir -p dist/dmg out
-          cp -R dist/OpenVClient.app dist/dmg/
-          ln -s /Applications dist/dmg/Applications
-          hdiutil create -volname "OpenVClient" -srcfolder dist/dmg -ov -format UDZO \
-            "out/OpenVClient-${VERSION}-macos-universal.dmg"
+          # Background, Applications shortcut, icon layout and volume icon (dmgbuild).
+          SKIP_BUILD=1 APP=dist/OpenVClient.app DMG_ARCH=universal ./scripts/package-macos-dmg.sh
+          mkdir -p out
+          mv "dist/OpenVClient-${VERSION}-macos-universal.dmg" out/
           ditto -c -k --keepParent dist/OpenVClient.app "out/OpenVClient-${VERSION}-macos-universal.zip"
       - name: Sign and notarise .dmg
         if: env.MACOS_CERTIFICATE != '' && env.APPLE_ID != ''
@@ -160,7 +161,10 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       # Builds, Authenticode-signs when WINDOWS_CERTIFICATE is set, and zips.
-      - name: Build and package
+      - name: Install Inno Setup
+        shell: pwsh
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build installer and portable zip
         shell: pwsh
         run: .\scripts\bundle-windows.ps1 -Target ${{ matrix.target }}
       - name: Show signature status
@@ -169,7 +173,10 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: windows-${{ matrix.arch }}
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
+            dist/*-setup.exe.sha256
           if-no-files-found: error
 
   linux:
@@ -191,23 +198,34 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libxkbcommon-dev \
-            libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libx11-dev libgl1-mesa-dev file
+            libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libx11-dev libgl1-mesa-dev file \
+            rpm python3-pil desktop-file-utils libfuse2
+          # appimagetool from a pinned release (add a sha256 check once the release hash is recorded).
+          APPIMAGETOOL_URL=https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          curl -fsSL -o /tmp/appimagetool "$APPIMAGETOOL_URL"
+          chmod +x /tmp/appimagetool
+          echo "APPIMAGETOOL=/tmp/appimagetool" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Build and package (tar.gz + .deb)
+      - name: Build and package (tar.gz, .deb, .rpm, AppImage)
         env:
           TARGET: ${{ matrix.target }}
         run: ./scripts/bundle-linux.sh
-      - name: Inspect .deb
-        run: dpkg-deb --info dist/*.deb && dpkg-deb --contents dist/*.deb
+      - name: Check packages
+        run: |
+          dpkg-deb --info dist/*.deb && dpkg-deb --contents dist/*.deb | grep -E "applications|hicolor/256|bin/openvclient"
+          rpm -qlp dist/*.rpm | grep -E "applications|bin/openvclient"
+          tar -xzf dist/*.tar.gz -C "$RUNNER_TEMP" && desktop-file-validate "$RUNNER_TEMP"/openvclient-*/usr/share/applications/openvclient.desktop
       - uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.arch }}
           path: |
             dist/*.tar.gz
             dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
           if-no-files-found: error
 
   publish:
