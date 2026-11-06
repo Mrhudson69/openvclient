@@ -8,28 +8,49 @@ use openvclient_core::{Error, Result, ResultSet};
 
 use crate::{D, PgSession};
 
+/// Version-dependent pieces of the monitoring queries. Wait events and
+/// pg_blocking_pids arrived in PostgreSQL 9.6, backend_type in 10; openGauss and
+/// Kingbase report older versions and use the 9.2 `waiting` flag instead.
+struct Monitor {
+    waiting: &'static str,
+    lock_wait: &'static str,
+    backend_type: &'static str,
+    blocked_by: &'static str,
+}
+
+fn monitor(s: &PgSession) -> Monitor {
+    let v = s.version_num();
+    Monitor {
+        waiting: if v >= 90600 { "CASE WHEN wait_event IS NOT NULL THEN wait_event_type || ': ' || wait_event END" } else { "CASE WHEN waiting THEN 'Lock' END" },
+        lock_wait: if v >= 90600 { "wait_event_type = 'Lock'" } else { "waiting" },
+        backend_type: if v >= 100000 { "backend_type" } else { "NULL::text AS backend_type" },
+        blocked_by: if v >= 90600 { "array_to_string(pg_blocking_pids(pid), ', ')" } else { "NULL::text" },
+    }
+}
+
 pub async fn activity(s: &PgSession) -> Result<ActivitySnapshot> {
-    let rows = s
-        .text_result(
-            None,
-            "SELECT pid::text AS pid, usename::text AS \"user\", datname::text AS database, application_name AS application, \
-             host(client_addr) AS client, state, \
-             CASE WHEN wait_event IS NOT NULL THEN wait_event_type || ': ' || wait_event END AS waiting, \
-             to_char(now() - query_start, 'HH24:MI:SS.MS') AS running_for, \
-             to_char(now() - xact_start, 'HH24:MI:SS') AS in_transaction, \
-             backend_type, array_to_string(pg_blocking_pids(pid), ', ') AS blocked_by, \
-             CASE WHEN pid = pg_backend_pid() THEN '(this connection) ' ELSE '' END || coalesce(query, '') AS query \
-             FROM pg_stat_activity ORDER BY (state = 'active') DESC NULLS LAST, query_start NULLS LAST",
-            &[],
-        )
-        .await?;
+    let m = monitor(s);
+    let sql = format!(
+        "SELECT pid::text AS pid, usename::text AS \"user\", datname::text AS database, application_name AS application, \
+         host(client_addr) AS client, state, \
+         {} AS waiting, \
+         to_char(now() - query_start, 'HH24:MI:SS.MS') AS running_for, \
+         to_char(now() - xact_start, 'HH24:MI:SS') AS in_transaction, \
+         {}, {} AS blocked_by, \
+         CASE WHEN pid = pg_backend_pid() THEN '(this connection) ' ELSE '' END || coalesce(query, '') AS query \
+         FROM pg_stat_activity ORDER BY (state = 'active') DESC NULLS LAST, query_start NULLS LAST",
+        m.waiting, m.backend_type, m.blocked_by
+    );
+    let rows = s.text_result(None, &sql, &[]).await?;
     Ok(ActivitySnapshot { rows, id_column: 0 })
 }
 
 pub async fn kill(s: &PgSession, id: &str, mode: KillMode) -> Result<()> {
-    let pid: i32 = id.parse().map_err(|_| Error::invalid(format!("Invalid pid {id}")))?;
+    // i64: openGauss uses thread ids as pids, which exceed 32 bits. The parsed
+    // number goes in as a literal so the server picks int or bigint.
+    let pid: i64 = id.parse().map_err(|_| Error::invalid(format!("Invalid pid {id}")))?;
     let f = if mode == KillMode::CancelQuery { "pg_cancel_backend" } else { "pg_terminate_backend" };
-    let rows = s.text_rows(None, &format!("SELECT {f}($1)::text"), &[&pid]).await?;
+    let rows = s.text_rows(None, &format!("SELECT {f}({pid})::text"), &[]).await?;
     match rows.first().and_then(|r| r[0].as_deref()) {
         Some("true") => Ok(()),
         _ => Err(Error::server(format!("Server did not signal pid {pid} (already gone, or insufficient privilege)"))),
@@ -37,33 +58,31 @@ pub async fn kill(s: &PgSession, id: &str, mode: KillMode) -> Result<()> {
 }
 
 pub async fn locks(s: &PgSession) -> Result<ResultSet> {
-    s.text_result(
-        None,
+    let blocked_by = monitor(s).blocked_by.replace("(pid)", "(l.pid)");
+    let sql = format!(
         "SELECT l.pid::text AS pid, a.usename::text AS \"user\", l.locktype AS lock_type, \
          coalesce(c.relname::text, l.relation::text) AS relation, l.mode, l.granted::text AS granted, \
-         array_to_string(pg_blocking_pids(l.pid), ', ') AS blocked_by, \
+         {blocked_by} AS blocked_by, \
          to_char(now() - a.query_start, 'HH24:MI:SS') AS waiting_for, a.query \
          FROM pg_locks l LEFT JOIN pg_class c ON c.oid = l.relation \
          LEFT JOIN pg_stat_activity a ON a.pid = l.pid \
          WHERE l.pid <> pg_backend_pid() \
-         ORDER BY l.granted, l.pid",
-        &[],
-    )
-    .await
+         ORDER BY l.granted, l.pid"
+    );
+    s.text_result(None, &sql, &[]).await
 }
 
 pub async fn metrics(s: &PgSession) -> Result<Vec<Metric>> {
-    let r = s
-        .text_rows(
-            None,
-            "SELECT \
+    let lock_wait = monitor(s).lock_wait;
+    let sql = format!(
+        "SELECT \
               current_setting('server_version'), \
               to_char(now() - pg_postmaster_start_time(), 'DD \"days\" HH24:MI:SS'), \
               (SELECT count(*) FROM pg_stat_activity)::text, \
               current_setting('max_connections'), \
               (SELECT count(*) FROM pg_stat_activity WHERE state = 'active')::text, \
               (SELECT count(*) FROM pg_stat_activity WHERE state = 'idle in transaction')::text, \
-              (SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock')::text, \
+              (SELECT count(*) FROM pg_stat_activity WHERE {lock_wait})::text, \
               pg_size_pretty(pg_database_size(current_database())), \
               pg_database_size(current_database())::text, \
               (SELECT round(100.0 * sum(blks_hit) / nullif(sum(blks_hit) + sum(blks_read), 0), 2) FROM pg_stat_database)::text, \
@@ -82,10 +101,9 @@ pub async fn metrics(s: &PgSession) -> Result<Vec<Metric>> {
               pg_is_in_recovery()::text, \
               current_setting('shared_buffers'), current_setting('work_mem'), current_setting('effective_cache_size'), \
               (SELECT count(*) FROM pg_database WHERE NOT datistemplate)::text, \
-              (SELECT sum(n_dead_tup) FROM pg_stat_user_tables)::text",
-            &[],
-        )
-        .await?;
+              (SELECT sum(n_dead_tup) FROM pg_stat_user_tables)::text"
+    );
+    let r = s.text_rows(None, &sql, &[]).await?;
     let r = r.into_iter().next().unwrap_or_default();
     let g = |i: usize| r.get(i).cloned().flatten().unwrap_or_else(|| "–".into());
     Ok(vec![
@@ -163,9 +181,17 @@ pub async fn create_principal(s: &PgSession, spec: PrincipalSpec) -> Result<()> 
     }
     let mut sql = format!("CREATE ROLE {} WITH", D.quote_ident(&spec.name));
     sql.push_str(if spec.can_login { " LOGIN" } else { " NOLOGIN" });
-    sql.push_str(if spec.superuser { " SUPERUSER" } else { " NOSUPERUSER" });
-    sql.push_str(if spec.create_db { " CREATEDB" } else { " NOCREATEDB" });
-    sql.push_str(if spec.create_role { " CREATEROLE" } else { " NOCREATEROLE" });
+    // Only the non-default options: the NO… forms are the defaults everywhere, and
+    // openGauss rejects NOSUPERUSER (its superuser option is SYSADMIN).
+    if spec.superuser {
+        sql.push_str(if s.is_gauss() { " SYSADMIN" } else { " SUPERUSER" });
+    }
+    if spec.create_db {
+        sql.push_str(" CREATEDB");
+    }
+    if spec.create_role {
+        sql.push_str(" CREATEROLE");
+    }
     if let Some(pw) = spec.password.filter(|p| !p.is_empty()) {
         sql.push_str(&format!(" PASSWORD {}", D.quote_literal(&pw)));
     }

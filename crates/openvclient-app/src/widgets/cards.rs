@@ -34,7 +34,5 @@ pub fn grid<T>(ui: &mut Ui, items: &[T], w: f32, h: f32, mut body: impl FnMut(&m
 }
 
 pub fn card_frame(ui: &Ui, rect: Rect, resp: &Response) {
-    let t = theme::tokens(ui);
-    let hot = resp.hovered() && resp.sense.senses_click();
-    ui.painter().rect(rect, 10.0, if hot { t.muted } else { t.card }, egui::Stroke::new(if hot { 1.5 } else { 1.0 }, if hot { t.ring } else { t.border }), egui::StrokeKind::Inside);
+    theme::paint_card(ui, rect, resp.hovered() && resp.sense.senses_click());
 }

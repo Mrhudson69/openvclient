@@ -136,7 +136,7 @@ def dmg_background(scale=1):
     x0, x1 = 262 * scale, 398 * scale
     d.line([(x0, y), (x1 - 16 * scale, y)], fill=GREEN_500, width=6 * scale)
     d.polygon([(x1, y), (x1 - 24 * scale, y - 14 * scale), (x1 - 24 * scale, y + 14 * scale)], fill=GREEN_500)
-    d.text((W / 2, H - 30 * scale), "Open-source · github.com/Mrhudson69/openvclient", fill=SLATE_700, font=font(12 * scale), anchor="mm")
+    d.text((W / 2, H - 30 * scale), "Open-source · github.com/openvclient/openvclient", fill=SLATE_700, font=font(12 * scale), anchor="mm")
     return img
 
 

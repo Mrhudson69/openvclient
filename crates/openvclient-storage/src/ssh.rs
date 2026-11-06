@@ -605,6 +605,29 @@ mod auth_tests {
         v
     }
 
+    /// "Password" must also work on servers that take the password only through
+    /// keyboard-interactive (PAM; Ubuntu, Mint and many others), like OpenSSH does.
+    /// Server: the Ubuntu image with `PasswordAuthentication no`,
+    /// `KbdInteractiveAuthentication yes`, user ovc/ovcpass, on port 52223.
+    #[tokio::test]
+    async fn password_falls_back_to_keyboard_interactive() {
+        let p = |v, secret: &str| ConnectParams { values: v, secret: Some(secret.to_owned()), read_only: false, notifier: None };
+        let mut v = base("password");
+        v.insert("port".into(), std::env::var("OPENVCLIENT_SSH_PAM_PORT").unwrap_or_else(|_| "52223".into()));
+        v.insert("user".into(), "ovc".into());
+        let trusted = match super::trust_for_test(p(v.clone(), "ovcpass")).await {
+            Ok(t) => t.values,
+            Err(e) => {
+                eprintln!("skipping: no PAM SSH server ({e})");
+                return;
+            }
+        };
+        let h = SshDriver::default().connect(p(trusted.clone(), "ovcpass")).await.expect("password login through keyboard-interactive");
+        h.base().ping().await.unwrap();
+        let e = SshDriver::default().connect(p(trusted, "wrong")).await.err().expect("wrong password refused");
+        assert!(e.message.contains("authentication failed") && e.message.contains("keyboard-interactive"), "{e}");
+    }
+
     #[tokio::test]
     async fn keyboard_interactive_and_jump_host() {
         let p = |v, secret: Option<&str>| ConnectParams { values: v, secret: secret.map(str::to_owned), read_only: false, notifier: None };

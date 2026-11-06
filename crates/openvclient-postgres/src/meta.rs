@@ -98,10 +98,12 @@ pub async fn children(s: &PgSession, node: Option<(ObjectKind, ObjPath)>) -> Res
                 _ => ("'S'", ObjectKind::Sequence),
             };
             let schema = path.schema.clone().unwrap_or_default();
+            // relispartition exists from PostgreSQL 10; openGauss and Kingbase report older versions.
+            let partitions = if s.version_num() >= 100000 { "AND NOT c.relispartition" } else { "" };
             let sql = format!(
                 "SELECT c.relname::text, c.reltuples::bigint::text, pg_size_pretty(pg_total_relation_size(c.oid)), c.relkind::text \
                  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
-                 WHERE n.nspname = $1 AND c.relkind IN ({kinds}) AND NOT c.relispartition ORDER BY c.relname"
+                 WHERE n.nspname = $1 AND c.relkind IN ({kinds}) {partitions} ORDER BY c.relname"
             );
             let rows = s.text_rows(Some(&db), &sql, &[&schema]).await?;
             Ok(rows
@@ -227,20 +229,21 @@ pub async fn children(s: &PgSession, node: Option<(ObjectKind, ObjPath)>) -> Res
 }
 
 pub async fn columns(s: &PgSession, path: &ObjPath) -> Result<Vec<ColumnInfo>> {
-    let rows = s
-        .text_rows(
-            Some(s.db_of(path)),
-            "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), (NOT a.attnotnull)::text, \
-             pg_get_expr(d.adbin, d.adrelid), \
-             (EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = a.attrelid AND i.indisprimary AND a.attnum = ANY(i.indkey)))::text, \
-             (a.attidentity <> '' OR coalesce(pg_get_expr(d.adbin, d.adrelid), '') LIKE 'nextval(%')::text, \
-             col_description(a.attrelid, a.attnum), a.attgenerated::text \
-             FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
-             LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
-             WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
-            &[&path.schema.clone().unwrap_or_else(|| "public".into()), &path.name()?.to_string()],
-        )
-        .await?;
+    // Identity columns arrived in PostgreSQL 10, generated columns in 12.
+    let v = s.version_num();
+    let identity = if v >= 100000 { "a.attidentity <> '' OR " } else { "" };
+    let generated = if v >= 120000 { "a.attgenerated::text" } else { "''::text" };
+    let sql = format!(
+        "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), (NOT a.attnotnull)::text, \
+         pg_get_expr(d.adbin, d.adrelid), \
+         (EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = a.attrelid AND i.indisprimary AND a.attnum = ANY(i.indkey)))::text, \
+         ({identity}coalesce(pg_get_expr(d.adbin, d.adrelid), '') LIKE 'nextval(%')::text, \
+         col_description(a.attrelid, a.attnum), {generated} \
+         FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+         LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
+         WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum"
+    );
+    let rows = s.text_rows(Some(s.db_of(path)), &sql, &[&path.schema.clone().unwrap_or_else(|| "public".into()), &path.name()?.to_string()]).await?;
     if rows.is_empty() {
         return Err(Error::invalid(format!("{} not found", path.display())));
     }
@@ -402,16 +405,15 @@ async fn table_ddl(s: &PgSession, path: &ObjPath) -> Result<String> {
     for c in &cons {
         lines.push(format!("    CONSTRAINT {} {}", D.quote_ident(c[0].as_deref().unwrap_or_default()), c[1].clone().unwrap_or_default()));
     }
-    let info = s
-        .text_rows(
-            Some(&db),
-            "SELECT c.relkind::text, CASE WHEN c.relkind = 'p' THEN pg_get_partkeydef(c.oid) END, obj_description(c.oid, 'pg_class'), \
-             (SELECT string_agg(quote_ident(pn.nspname) || '.' || quote_ident(pc.relname), ', ') FROM pg_inherits i \
-              JOIN pg_class pc ON pc.oid = i.inhparent JOIN pg_namespace pn ON pn.oid = pc.relnamespace WHERE i.inhrelid = c.oid) \
-             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
-            &[&schema, &name],
-        )
-        .await?;
+    // Declarative partitioning (pg_get_partkeydef) exists from PostgreSQL 10.
+    let partkey = if s.version_num() >= 100000 { "CASE WHEN c.relkind = 'p' THEN pg_get_partkeydef(c.oid) END" } else { "NULL::text" };
+    let info_sql = format!(
+        "SELECT c.relkind::text, {partkey}, obj_description(c.oid, 'pg_class'), \
+         (SELECT string_agg(quote_ident(pn.nspname) || '.' || quote_ident(pc.relname), ', ') FROM pg_inherits i \
+          JOIN pg_class pc ON pc.oid = i.inhparent JOIN pg_namespace pn ON pn.oid = pc.relnamespace WHERE i.inhrelid = c.oid) \
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2"
+    );
+    let info = s.text_rows(Some(&db), &info_sql, &[&schema, &name]).await?;
     let info = info.into_iter().next().unwrap_or_default();
     let mut out = format!("CREATE TABLE {target} (\n{}\n)", lines.join(",\n"));
     if let Some(parents) = info.get(3).cloned().flatten() {

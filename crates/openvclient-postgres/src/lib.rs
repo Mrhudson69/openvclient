@@ -244,6 +244,12 @@ impl PgSession {
         p.database.as_deref().unwrap_or(&self.target.database)
     }
 
+    /// openGauss and Huawei GaussDB: PostgreSQL 9.2 protocol and catalogs with their own role options.
+    pub fn is_gauss(&self) -> bool {
+        let p = self.info.lock().product.to_lowercase();
+        p.contains("opengauss") || p.contains("gaussdb")
+    }
+
     pub fn version_num(&self) -> i32 {
         self.info.lock().details.iter().find(|(k, _)| k == "Version number").and_then(|(_, v)| v.parse().ok()).unwrap_or(0)
     }

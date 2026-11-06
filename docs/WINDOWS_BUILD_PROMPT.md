@@ -4,7 +4,7 @@ Clone the repository on the Windows machine, open Claude Code in the clone, and
 paste everything inside the block below.
 
 ```text
-You are on a Windows 10/11 machine in a clone of https://github.com/Mrhudson69/openvclient
+You are on a Windows 10/11 machine in a clone of https://github.com/openvclient/openvclient
 (OpenVClient: a Rust + egui desktop app for databases and infrastructure). Read CLAUDE.md,
 README.md, CONTRIBUTING.md, docs/RELEASE_PLAN.md and docs/QA_REPORT.md first and follow them
 (UI work uses the ui-ux-pro-max design rules in design-system/openvclient/MASTER.md: colours from

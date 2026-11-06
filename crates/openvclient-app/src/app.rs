@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::bg::{Bg, Job};
 use crate::conns::{ConnEvent, ConnState, Connections};
-use crate::store::{Store, ThemeChoice};
+use crate::store::{Store, ThemeChoice, ThemeStyle};
 use crate::theme::{self, ico};
 use crate::views;
 use crate::widgets::toasts::Toasts;
@@ -136,6 +136,7 @@ pub struct AppCtx {
     pub last_save: Instant,
     pub show_settings: bool,
     pub show_about: bool,
+    pub show_shortcuts: bool,
     /// Statements confirmed for production, keyed by tab id.
     pub pending_sql: Option<(u64, Vec<String>)>,
     /// Confirmed destructive resource actions, picked up by the connection's tab.
@@ -236,6 +237,23 @@ impl Tab {
             TabKind::Resource(t) => Some(t.conn),
             TabKind::Terminal(t) => Some(t.conn),
             TabKind::Files(t) => Some(t.conn),
+        }
+    }
+
+    /// The tab's icon, also the leading glyph of its title.
+    fn icon(&self) -> egui_material_icons::MaterialIcon {
+        match &self.kind {
+            TabKind::Home => ICON_DASHBOARD,
+            TabKind::Sql(_) => ICON_CODE,
+            TabKind::Table(_) => ICON_TABLE,
+            TabKind::Object(_) => ICON_DATA_OBJECT,
+            TabKind::Monitor(_) => ICON_MONITORING,
+            TabKind::Users(_) => ICON_GROUP,
+            TabKind::Redis(_) => ICON_KEY,
+            TabKind::Docker(_) => ICON_DEPLOYED_CODE,
+            TabKind::Resource(t) => t.node.as_ref().map(|n| views::resource::node_icon(n.icon)).unwrap_or(ICON_DNS),
+            TabKind::Terminal(_) => ICON_TERMINAL,
+            TabKind::Files(_) => ICON_FOLDER_OPEN,
         }
     }
 
@@ -349,11 +367,18 @@ impl Behavior<Tab> for Viewer<'_> {
             _ => String::new(),
         };
         let prod = matches!(tiles.get(tile_id), Some(Tile::Pane(p)) if p.conn().and_then(|c| self.cx.store.profile(c)).is_some_and(|pr| pr.environment.is_protected()));
+        let (is_home, tab_icon, tab_driver) = match tiles.get(tile_id) {
+            Some(Tile::Pane(p)) => (matches!(p.kind, TabKind::Home), p.icon(), p.conn().and_then(|c| self.cx.store.profile(c)).map(|pr| pr.driver.clone())),
+            _ => (false, ICON_DASHBOARD, None),
+        };
+        // Cartoon tabs draw their icon in code, so the title drops its leading glyph.
+        let cartoon_glyph = theme::is_cartoon().then_some(tab_icon);
+        let title = if cartoon_glyph.is_some() { title.split_once("  ").map(|(_, rest)| rest.to_string()).unwrap_or(title) } else { title };
         let font = egui::FontId::proportional(13.5);
         let text_color = if state.active { t.fg } else { t.muted_fg };
         let galley = ui.painter().layout_no_wrap(title, font, text_color);
         let (pad, close) = (12.0, 18.0);
-        let width = galley.size().x + pad * 2.0 + if state.closable { close + 6.0 } else { 0.0 };
+        let width = galley.size().x + pad * 2.0 + if state.closable { close + 6.0 } else { 0.0 } + if cartoon_glyph.is_some() { 24.0 } else { 0.0 };
         let (_, rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
         let resp = ui.interact(rect, id, egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
         if !state.is_being_dragged {
@@ -369,7 +394,21 @@ impl Behavior<Tab> for Viewer<'_> {
                 let bar = if prod { t.destructive } else { t.accent };
                 ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), 2.0)), 0.0, bar);
             }
-            ui.painter().galley(egui::pos2(rect.left() + pad, rect.center().y - galley.size().y / 2.0), galley, text_color);
+            let mut tx = rect.left() + pad;
+            if let Some(glyph) = cartoon_glyph {
+                // Cartoon: Vee for Home, the connection's sticker for its tabs, else the cartoon icon.
+                let c = egui::pos2(tx + 9.0, rect.center().y);
+                let dark = ui.visuals().dark_mode;
+                match tab_driver.as_deref() {
+                    _ if is_home => {
+                        theme::paint_brand_mark(ui, egui::Rect::from_center_size(c, egui::vec2(18.0, 18.0)));
+                    }
+                    Some(d) => theme::paint_connector_sticker(ui.painter(), c, 18.0, d, dark),
+                    None => theme::paint_cartoon_icon(ui.painter(), c, 17.0, glyph, dark),
+                }
+                tx += 24.0;
+            }
+            ui.painter().galley(egui::pos2(tx, rect.center().y - galley.size().y / 2.0), galley, text_color);
             if state.closable {
                 let crect = egui::Rect::from_center_size(egui::pos2(rect.right() - pad / 2.0 - close / 2.0, rect.center().y), egui::vec2(close, close));
                 let cresp = ui.interact(crect, id.with("close"), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Close tab (⌘W)");
@@ -415,6 +454,7 @@ impl OpenvApp {
     pub fn new(ctx: &egui::Context, rt: tokio::runtime::Handle, registry: DriverRegistry) -> Self {
         let store = Store::load();
         let bg = Bg::new(rt, ctx.clone());
+        theme::set_cartoon(ctx, store.ws.settings.style == ThemeStyle::Cartoon);
         apply_theme(ctx, store.ws.settings.theme);
         let mut cx = AppCtx {
             bg,
@@ -436,6 +476,7 @@ impl OpenvApp {
             last_save: Instant::now(),
             show_settings: false,
             show_about: false,
+            show_shortcuts: false,
             pending_sql: None,
             resource_jobs: HashMap::new(),
             store,
@@ -663,15 +704,19 @@ impl OpenvApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
-        let (palette, new_conn, new_sql, close, home) = ctx.input_mut(|i| {
+        let (palette, new_conn, new_sql, close, home, keys) = ctx.input_mut(|i| {
             (
                 i.consume_shortcut(&cmd(Key::K)) || i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::P)),
                 i.consume_shortcut(&cmd(Key::N)),
                 i.consume_shortcut(&cmd(Key::T)),
                 i.consume_shortcut(&cmd(Key::W)),
                 i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::H)),
+                i.consume_shortcut(&cmd(Key::Slash)),
             )
         });
+        if keys {
+            self.cx.show_shortcuts = !self.cx.show_shortcuts;
+        }
         if palette {
             self.cx.palette.open();
         }
@@ -738,16 +783,6 @@ impl OpenvApp {
                     }
                     if ui.button(String::from(ICON_INFO)).on_hover_text(format!("About OpenVClient {}", env!("CARGO_PKG_VERSION"))).clicked() {
                         self.cx.show_about = !self.cx.show_about;
-                    }
-                    let (icon, next, tip) = match self.cx.store.ws.settings.theme {
-                        ThemeChoice::System => (ICON_CONTRAST, ThemeChoice::Dark, "Theme: system (click for dark)"),
-                        ThemeChoice::Dark => (ICON_DARK_MODE, ThemeChoice::Light, "Theme: dark (click for light)"),
-                        ThemeChoice::Light => (ICON_LIGHT_MODE, ThemeChoice::System, "Theme: light (click for system)"),
-                    };
-                    if ui.button(String::from(icon)).on_hover_text(tip).clicked() {
-                        self.cx.store.ws.settings.theme = next;
-                        apply_theme(ui.ctx(), next);
-                        self.cx.mark_dirty();
                     }
                     if let Some(rel) = &self.cx.update.available {
                         let label = format!("Update {}", rel.version);
@@ -1015,6 +1050,10 @@ impl OpenvApp {
                 link(ui, ICON_CODE, "Source on GitHub", &repo);
                 link(ui, ICON_NEW_RELEASES, "Release notes", &format!("{repo}/releases"));
                 link(ui, ICON_BUG_REPORT, "Report a bug", &format!("{repo}/issues/new/choose"));
+                if ui.button(ico(ICON_KEYBOARD, "Keyboard shortcuts")).clicked() {
+                    self.cx.show_shortcuts = true;
+                    close = true;
+                }
             });
             ui.add_space(theme::space::SM);
             ui.separator();
@@ -1036,12 +1075,39 @@ impl OpenvApp {
         }
     }
 
+    fn shortcuts_window(&mut self, ctx: &egui::Context) {
+        if !self.cx.show_shortcuts {
+            return;
+        }
+        let mut close = false;
+        egui::Modal::new(egui::Id::unique("shortcuts")).show(ctx, |ui| {
+            ui.set_width(480.0_f32.min(ctx.content_rect().width() - 48.0));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(ico(ICON_KEYBOARD, "Keyboard shortcuts")).size(17.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(String::from(ICON_CLOSE)).on_hover_text("Close (Esc)").clicked() {
+                        close = true;
+                    }
+                });
+            });
+            ui.add_space(theme::space::SM);
+            views::shortcuts_grid(ui);
+            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                close = true;
+            }
+        });
+        if close {
+            self.cx.show_shortcuts = false;
+        }
+    }
+
     fn settings_window(&mut self, ctx: &egui::Context) {
         if !self.cx.show_settings {
             return;
         }
         let mut close = false;
         let mut check_now = false;
+        let mut open_keys = false;
         let before = self.cx.store.ws.settings.clone();
         egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
             ui.set_width(640.0_f32.min(ctx.content_rect().width() - 48.0));
@@ -1075,12 +1141,32 @@ impl OpenvApp {
                     ui.add_space(theme::space::XS);
                 };
                 ui.label(RichText::new("APPEARANCE").small().strong().color(t.muted_fg));
-                row(ui, "Theme", "", &mut |ui| {
-                    for (v, l) in [(ThemeChoice::System, "System"), (ThemeChoice::Dark, "Dark"), (ThemeChoice::Light, "Light")] {
-                        if ui.selectable_value(&mut s.theme, v, l).clicked() {
-                            apply_theme(ui.ctx(), v);
+                row(ui, "Style", "Original look, or the playful cartoon look of openvclient.xyz", &mut |ui| {
+                    let label = |v: ThemeStyle| match v {
+                        ThemeStyle::Original => "Original",
+                        ThemeStyle::Cartoon => "Cartoon",
+                    };
+                    egui::ComboBox::from_id_salt("theme_style").selected_text(label(s.style)).width(160.0).show_ui(ui, |ui| {
+                        for v in [ThemeStyle::Original, ThemeStyle::Cartoon] {
+                            if ui.selectable_value(&mut s.style, v, label(v)).clicked() {
+                                theme::set_cartoon(ui.ctx(), v == ThemeStyle::Cartoon);
+                            }
                         }
-                    }
+                    });
+                });
+                row(ui, "Mode", "Light or dark; System follows your computer", &mut |ui| {
+                    let label = |v: ThemeChoice| match v {
+                        ThemeChoice::Dark => "Dark",
+                        ThemeChoice::Light => "Light",
+                        _ => "System",
+                    };
+                    egui::ComboBox::from_id_salt("theme_mode").selected_text(label(s.theme)).width(160.0).show_ui(ui, |ui| {
+                        for v in [ThemeChoice::System, ThemeChoice::Dark, ThemeChoice::Light] {
+                            if ui.selectable_value(&mut s.theme, v, label(v)).clicked() {
+                                apply_theme(ui.ctx(), v);
+                            }
+                        }
+                    });
                 });
                 row(ui, "Editor font size", "SQL editor and DDL views", &mut |ui| {
                     ui.spacing_mut().slider_width = 220.0;
@@ -1111,6 +1197,13 @@ impl OpenvApp {
                     ui.checkbox(&mut s.confirm_production, "Type the name to confirm destructive actions");
                 });
                 ui.add_space(theme::space::SM);
+                ui.label(RichText::new("HELP").small().strong().color(t.muted_fg));
+                row(ui, "Keyboard shortcuts", &theme::kbd("All shortcuts; also ⌘/ anywhere"), &mut |ui| {
+                    if ui.button(ico(ICON_KEYBOARD, "Show shortcuts")).clicked() {
+                        open_keys = true;
+                    }
+                });
+                ui.add_space(theme::space::SM);
                 ui.separator();
                 // Paths wrap inside the dialog instead of widening it.
                 ui.add(egui::Label::new(RichText::new(format!("Workspace file: {}", crate::store::config_dir().join("workspace.json").display())).small().color(t.muted_fg)).wrap());
@@ -1132,6 +1225,10 @@ impl OpenvApp {
         if check_now {
             self.cx.check_updates(true);
         }
+        if open_keys {
+            self.cx.show_shortcuts = true;
+            self.cx.show_settings = false;
+        }
         if close {
             self.cx.show_settings = false;
         }
@@ -1151,9 +1248,10 @@ impl OpenvApp {
     }
 }
 
+/// Light/dark mode; the style (original or cartoon) is `theme::set_cartoon`.
 pub fn apply_theme(ctx: &egui::Context, t: ThemeChoice) {
     ctx.set_theme(match t {
-        ThemeChoice::System => egui::ThemePreference::System,
+        ThemeChoice::System | ThemeChoice::LegacyCartoon => egui::ThemePreference::System,
         ThemeChoice::Dark => egui::ThemePreference::Dark,
         ThemeChoice::Light => egui::ThemePreference::Light,
     });
@@ -1315,6 +1413,7 @@ impl eframe::App for OpenvApp {
         self.confirm_dialog(&ctx);
         self.settings_window(&ctx);
         self.about_window(&ctx);
+        self.shortcuts_window(&ctx);
         let tabs: Vec<(u64, String)> = self.tree.tiles.tiles().filter_map(|t| if let Tile::Pane(p) = t { Some((p.id, p.title(&self.cx))) } else { None }).collect();
         views::palette::show(&ctx, &mut self.cx, &tabs);
         self.cx.toasts.show(&ctx);
@@ -1563,6 +1662,18 @@ mod walkthrough {
         h.state_mut().cx.cmd(Cmd::Connect(id));
         settle(&mut h, |a| a.cx.conns.is_connected(id), Duration::from_secs(15));
         let s = h.state().cx.conns.session(id).and_then(|x| x.resource()).cloned().expect("azurite session");
+        // Opening a connected storage connection (home card click, sidebar
+        // double-click) must open the file manager, not the Docker view.
+        {
+            let app = h.state_mut();
+            let p = app.cx.store.profile(id).cloned().unwrap();
+            crate::views::open_connection(&mut app.cx, &p);
+        }
+        for _ in 0..4 {
+            h.step();
+        }
+        assert!(h.state().find(|t| matches!(t.kind, TabKind::Files(_))).is_some(), "storage connection should open the file manager");
+        assert!(h.state().find(|t| matches!(t.kind, TabKind::Docker(..))).is_none(), "storage connection must not open the Docker view");
 
         // Seed: a container with folders and a few typical files.
         let dir = std::env::temp_dir().join("ovc-files-shots");
@@ -1627,6 +1738,215 @@ mod walkthrough {
         shot(&mut h, &out, "f4-files-light");
         h.state_mut().cx.show_about = true;
         shot(&mut h, &out, "f5-about");
+        h.state_mut().cx.show_about = false;
+        theme::set_cartoon(&h.ctx, true);
+        shot(&mut h, &out, "f6-files-cartoon-day");
+        h.ctx.set_theme(egui::Theme::Dark);
+        shot(&mut h, &out, "f7-files-cartoon-night");
+        let up = Node::new("c/analytics-exports", "analytics-exports", "container", NodeIcon::Bucket).folder();
+        h.state_mut().cx.cmd(Cmd::OpenResource { conn: id, node: Some(up), action: None });
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "f8-folders-cartoon-night");
+        drop(h);
+        rt.shutdown_timeout(Duration::from_secs(1));
+    }
+
+    /// Cartoon theme screenshots on a scratch workspace (no real connections):
+    /// `OPENVCLIENT_CONFIG_DIR=<empty dir> OPENVCLIENT_SHOTS=<out> cargo test -p openvclient-app cartoon_walkthrough -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn cartoon_walkthrough() {
+        use openvclient_core::{ConnectionProfile, Environment};
+        let out = std::path::PathBuf::from(std::env::var("OPENVCLIENT_SHOTS").expect("set OPENVCLIENT_SHOTS"));
+        std::fs::create_dir_all(&out).unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let handle = rt.handle().clone();
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_pixels_per_point(1.5).with_max_steps(64).build_eframe(move |cc| {
+            theme::install(&cc.egui_ctx);
+            OpenvApp::new(&cc.egui_ctx, handle, crate::registry())
+        });
+        let db = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/shop.db").canonicalize().expect("demo/shop.db");
+        let mut shop = ConnectionProfile::new("sqlite", "Shop demo");
+        shop.params.insert("path".into(), db.display().to_string());
+        let shop_id = shop.id;
+        let mut others = Vec::new();
+        for (driver, name, env) in [
+            ("postgres", "Orders (staging)", Environment::Staging),
+            ("redis", "Session cache", Environment::Development),
+            ("s3", "Media bucket", Environment::Production),
+            ("mongodb", "Events", Environment::Testing),
+            ("ssh", "bastion-01", Environment::Production),
+        ] {
+            let mut p = ConnectionProfile::new(driver, name);
+            p.environment = env;
+            others.push(p);
+        }
+        {
+            let app = h.state_mut();
+            app.cx.store.ws.profiles.push(shop);
+            let pinned = others[0].id;
+            app.cx.store.ws.profiles.extend(others);
+            app.cx.store.toggle_favorite(shop_id);
+            app.cx.store.toggle_favorite(pinned);
+            app.cx.store.ws.settings.style = ThemeStyle::Cartoon;
+        }
+        h.ctx.set_theme(egui::Theme::Light);
+        theme::set_cartoon(&h.ctx, true);
+        shot(&mut h, &out, "c1-home-day");
+        h.state_mut().cx.cmd(Cmd::Connect(shop_id));
+        settle(&mut h, |a| a.cx.conns.is_connected(shop_id), Duration::from_secs(10));
+        let sql = "-- Top customers\nSELECT c.name, c.country, count(*) AS orders, round(sum(o.total), 2) AS revenue\nFROM orders o JOIN customers c ON c.id = o.customer_id\nGROUP BY 1, 2 ORDER BY revenue DESC LIMIT 20;";
+        h.state_mut().cx.cmd(Cmd::NewSql { conn: shop_id, database: None, text: sql.into() });
+        std::thread::sleep(Duration::from_millis(400));
+        for _ in 0..10 {
+            h.step();
+        }
+        h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Enter);
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "c2-sql-day");
+        h.ctx.set_theme(egui::Theme::Dark);
+        shot(&mut h, &out, "c3-sql-night");
+        {
+            let cx = &h.state().cx;
+            let d = views::conn_dialog::ConnDialog::new(cx, None, None);
+            h.state_mut().cx.conn_dialog = Some(d);
+        }
+        shot(&mut h, &out, "c4-picker-night");
+        h.ctx.set_theme(egui::Theme::Light);
+        shot(&mut h, &out, "c5-picker-day");
+        h.state_mut().cx.conn_dialog = None;
+        h.state_mut().cx.show_settings = true;
+        shot(&mut h, &out, "c6-settings-day");
+        h.ctx.set_theme(egui::Theme::Dark);
+        shot(&mut h, &out, "c6-settings-night");
+        h.ctx.set_theme(egui::Theme::Light);
+        h.state_mut().cx.show_settings = false;
+        h.state_mut().cx.show_shortcuts = true;
+        shot(&mut h, &out, "c7-shortcuts-day");
+        drop(h);
+        rt.shutdown_timeout(Duration::from_secs(1));
+    }
+
+    /// README screenshots on neutral demo data (scratch workspace, demo SQLite
+    /// copied to /tmp/openvclient-demo so no personal paths show):
+    /// `OPENVCLIENT_CONFIG_DIR=<empty dir> OPENVCLIENT_SHOTS=<out> cargo test -p openvclient-app readme_screenshots -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn readme_screenshots() {
+        use openvclient_core::sql::{ObjPath, ObjectKind};
+        use openvclient_core::{ConnectionProfile, Environment};
+        let out = std::path::PathBuf::from(std::env::var("OPENVCLIENT_SHOTS").expect("set OPENVCLIENT_SHOTS"));
+        std::fs::create_dir_all(&out).unwrap();
+        let demo = std::path::Path::new("/tmp/openvclient-demo");
+        std::fs::create_dir_all(demo).unwrap();
+        let db = demo.join("shop.db");
+        std::fs::copy(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/shop.db"), &db).expect("demo/shop.db");
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let handle = rt.handle().clone();
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_pixels_per_point(1.5).with_max_steps(64).build_eframe(move |cc| {
+            theme::install(&cc.egui_ctx);
+            OpenvApp::new(&cc.egui_ctx, handle, crate::registry())
+        });
+        let mut shop = ConnectionProfile::new("sqlite", "Shop (SQLite demo)");
+        shop.params.insert("path".into(), db.display().to_string());
+        shop.folder = "Demo".into();
+        let shop_id = shop.id;
+        let mut all = vec![shop];
+        for (driver, name, env, folder) in [
+            ("postgres", "Orders DB", Environment::Staging, "Demo"),
+            ("mysql", "Billing", Environment::Production, "Demo"),
+            ("redis", "Session cache", Environment::Development, "Demo"),
+            ("mongodb", "Events", Environment::Testing, "Demo"),
+            ("s3", "Media bucket", Environment::Production, "Cloud"),
+            ("azure_blob", "Analytics exports", Environment::Production, "Cloud"),
+            ("ssh", "bastion-01", Environment::Production, "Servers"),
+            ("docker", "Local Docker", Environment::Development, "Servers"),
+        ] {
+            let mut p = ConnectionProfile::new(driver, name);
+            p.environment = env;
+            p.folder = folder.into();
+            match driver {
+                "postgres" => {
+                    p.params.insert("host".into(), "db.staging.example.com".into());
+                    p.params.insert("user".into(), "app".into());
+                    p.params.insert("database".into(), "orders".into());
+                }
+                "mysql" => {
+                    p.params.insert("host".into(), "billing.example.com".into());
+                    p.params.insert("user".into(), "report".into());
+                }
+                "redis" => {
+                    p.params.insert("host".into(), "cache.example.com".into());
+                }
+                "mongodb" => {
+                    p.params.insert("host".into(), "events.example.com".into());
+                }
+                "ssh" => {
+                    p.params.insert("host".into(), "bastion.example.com".into());
+                    p.params.insert("user".into(), "ops".into());
+                }
+                _ => {}
+            }
+            all.push(p);
+        }
+        let pinned = [all[0].id, all[1].id, all[6].id];
+        {
+            let app = h.state_mut();
+            app.cx.store.ws.profiles = all;
+            for id in pinned {
+                app.cx.store.toggle_favorite(id);
+            }
+        }
+        let style = |h: &mut Harness<'_, OpenvApp>, cartoon: bool, dark: bool| {
+            theme::set_cartoon(&h.ctx, cartoon);
+            h.ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
+        };
+
+        style(&mut h, false, true);
+        shot(&mut h, &out, "home-original-dark");
+        style(&mut h, true, false);
+        shot(&mut h, &out, "home-cartoon-light");
+
+        h.state_mut().cx.cmd(Cmd::Connect(shop_id));
+        settle(&mut h, |a| a.cx.conns.is_connected(shop_id), Duration::from_secs(10));
+        let sql = "-- Revenue by country, shipped orders only\nSELECT c.country,\n       count(*)               AS orders,\n       round(sum(o.total), 2) AS revenue,\n       round(avg(o.total), 2) AS avg_order\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nWHERE o.status = 'shipped'\nGROUP BY c.country\nORDER BY revenue DESC;";
+        h.state_mut().cx.cmd(Cmd::NewSql { conn: shop_id, database: None, text: sql.into() });
+        for _ in 0..10 {
+            h.step();
+        }
+        h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Enter);
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        style(&mut h, false, true);
+        shot(&mut h, &out, "sql-original-dark");
+        style(&mut h, false, false);
+        shot(&mut h, &out, "sql-original-light");
+
+        h.state_mut().cx.cmd(Cmd::OpenTable { conn: shop_id, kind: ObjectKind::Table, path: ObjPath::default().with_schema("main").with_name("orders") });
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        style(&mut h, true, true);
+        shot(&mut h, &out, "table-cartoon-dark");
+
+        {
+            let cx = &h.state().cx;
+            let d = views::conn_dialog::ConnDialog::new(cx, None, None);
+            h.state_mut().cx.conn_dialog = Some(d);
+        }
+        style(&mut h, true, false);
+        shot(&mut h, &out, "picker-cartoon-light");
+        h.state_mut().cx.conn_dialog = None;
+        h.state_mut().cx.show_settings = true;
+        style(&mut h, false, true);
+        shot(&mut h, &out, "settings-original-dark");
+        h.state_mut().cx.show_settings = false;
+        h.state_mut().cx.show_shortcuts = true;
+        style(&mut h, true, false);
+        shot(&mut h, &out, "shortcuts-cartoon-light");
         drop(h);
         rt.shutdown_timeout(Duration::from_secs(1));
     }

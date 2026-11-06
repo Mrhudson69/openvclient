@@ -188,7 +188,7 @@ impl ConnDialog {
         // One flat list of compact tiles: icon + name; details in the tooltip.
         crate::widgets::cards::grid(ui, &infos, 176.0, 40.0, |ui, info, resp| {
             ui.horizontal_centered(|ui| {
-                ui.label(RichText::new(String::from(crate::views::driver_icon(info.id))).size(theme::icon::MD).color(t.accent));
+                crate::views::driver_glyph(ui, info.id, theme::icon::MD, t.accent);
                 ui.add(egui::Label::new(RichText::new(info.name).strong()).truncate());
             });
             if resp.clone().on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(info.description).clicked() {
@@ -212,7 +212,7 @@ impl ConnDialog {
         };
         let info = driver.info().clone();
         ui.horizontal(|ui| {
-            ui.label(RichText::new(String::from(crate::views::driver_icon(info.id))).color(t.accent).size(18.0));
+            crate::views::driver_glyph(ui, info.id, 18.0, t.accent);
             ui.label(RichText::new(info.name).strong());
             if self.is_new && ui.small_button("Change").clicked() {
                 self.picking = true;

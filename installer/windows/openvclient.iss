@@ -34,7 +34,7 @@
 
 #define AppName "OpenVClient"
 #define AppPublisher "OpenVClient contributors"
-#define AppURL "https://github.com/Mrhudson69/openvclient"
+#define AppURL "https://github.com/openvclient/openvclient"
 #define AppExeName "OpenVClient.exe"
 #define Art "..\..\assets\installer\"
 

@@ -62,6 +62,86 @@ pub fn driver_icon(driver: &str) -> MaterialIcon {
     }
 }
 
+/// Connector logo: the material icon in the original themes, a cartoon
+/// sticker in the cartoon theme. Decorative: the connector name is always next to it.
+pub fn driver_glyph(ui: &mut egui::Ui, driver: &str, size: f32, color: egui::Color32) -> egui::Response {
+    if theme::is_cartoon() {
+        let s = size + 6.0;
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(s, s), egui::Sense::hover());
+        theme::paint_connector_sticker(ui.painter(), rect.center(), s, driver, ui.visuals().dark_mode);
+        resp
+    } else {
+        ui.label(RichText::new(String::from(driver_icon(driver))).size(size).color(color))
+    }
+}
+
+/// An item icon: the line icon in the original themes, its cartoon drawing in
+/// the cartoon theme.
+pub fn item_glyph(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, color: egui::Color32) -> egui::Response {
+    if theme::is_cartoon() {
+        let s = size + 2.0;
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(s, s), egui::Sense::hover());
+        theme::paint_cartoon_icon(ui.painter(), rect.center(), s, icon, ui.visuals().dark_mode);
+        resp
+    } else {
+        ui.label(RichText::new(String::from(icon)).size(size).color(color))
+    }
+}
+
+/// Open a connected connection's main view: the SQL editor for databases, the
+/// key browser for Redis, the file manager or service view for storage and
+/// services, the containers list for Docker.
+pub fn open_connection(cx: &mut crate::app::AppCtx, p: &openvclient_core::ConnectionProfile) {
+    use crate::app::Cmd;
+    use openvclient_core::SessionHandle;
+    let id = p.id;
+    let cmd = match cx.conns.session(id) {
+        Some(SessionHandle::Sql(_)) => Cmd::NewSql { conn: id, database: None, text: String::new() },
+        Some(SessionHandle::KeyValue(_)) => Cmd::OpenRedis { conn: id, db: p.param("db").parse().unwrap_or(0) },
+        Some(SessionHandle::Containers(_)) => Cmd::OpenDocker { conn: id, section: crate::views::docker::Section::Containers },
+        Some(SessionHandle::Resource(_)) => Cmd::OpenResource { conn: id, node: None, action: None },
+        None => Cmd::Connect(id),
+    };
+    cx.cmd(cmd);
+}
+
+/// Every global and editor shortcut, as shown in the Keyboard shortcuts window.
+pub const SHORTCUTS: &[(&str, &str, &str)] = &[
+    ("General", "⌘K", "Search everything"),
+    ("General", "⌘N", "New connection"),
+    ("General", "⌘⇧H", "Home"),
+    ("General", "⌘W", "Close tab"),
+    ("General", "F5", "Refresh the current view"),
+    ("General", "⌘/", "Keyboard shortcuts"),
+    ("SQL editor", "⌘T", "New SQL editor for the focused connection"),
+    ("SQL editor", "⌘⏎", "Run statement at cursor (or selection)"),
+    ("SQL editor", "⌘⇧⏎", "Run whole script"),
+    ("SQL editor", "⌘E", "Explain statement"),
+    ("SQL editor", "⌘.", "Cancel running query"),
+    ("SQL editor", "⌘S", "Save SQL to file"),
+    ("SQL editor", "⌃Space", "Autocomplete"),
+];
+
+/// Shortcut list grouped by area.
+pub fn shortcuts_grid(ui: &mut egui::Ui) {
+    let t = theme::tokens(ui);
+    let mut group = "";
+    egui::Grid::new("keys").num_columns(2).spacing([24.0, 6.0]).striped(false).show(ui, |ui| {
+        for (g, k, what) in SHORTCUTS {
+            if *g != group {
+                group = g;
+                ui.label(RichText::new(g.to_uppercase()).small().strong().color(t.muted_fg));
+                ui.end_row();
+            }
+            ui.label(RichText::new(theme::kbd(k)).monospace().strong());
+            ui.label(RichText::new(*what).color(t.fg));
+            ui.end_row();
+        }
+    });
+    ui.add_space(theme::space::SM);
+    ui.label(RichText::new("Drag a tab to the edge of another to split the workspace.").small().color(t.muted_fg));
+}
+
 /// Human name of a connector, e.g. "PostgreSQL".
 pub fn driver_label(cx: &crate::app::AppCtx, driver: &str) -> String {
     cx.conns.registry.get(driver).map(|d| d.info().name.to_string()).unwrap_or_else(|| driver.to_string())

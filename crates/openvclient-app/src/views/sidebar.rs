@@ -189,7 +189,7 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
 /// One tree row. `expanded` = Some(state) draws a chevron.
 #[allow(clippy::too_many_arguments)]
 fn row(ui: &mut egui::Ui, indent: f32, expanded: Option<bool>, icon: egui_material_icons::MaterialIcon, icon_color: egui::Color32, label: &str, detail: &str, selected: bool) -> egui::Response {
-    row_with_trailing(ui, indent, expanded, icon, icon_color, label, detail, selected, 0.0)
+    row_with_trailing(ui, indent, expanded, icon, icon_color, None, label, detail, selected, 0.0)
 }
 
 /// `trailing` reserves space at the right edge (status dot, PROD marker).
@@ -200,6 +200,7 @@ fn row_with_trailing(
     expanded: Option<bool>,
     icon: egui_material_icons::MaterialIcon,
     icon_color: egui::Color32,
+    driver: Option<&str>,
     label: &str,
     detail: &str,
     selected: bool,
@@ -225,7 +226,13 @@ fn row_with_trailing(
         ui.painter().text(egui::pos2(x + 7.0, cy), egui::Align2::CENTER_CENTER, String::from(g), egui::FontId::proportional(theme::icon::MD), t.muted_fg);
     }
     x += 16.0;
-    ui.painter().text(egui::pos2(x + 8.0, cy), egui::Align2::CENTER_CENTER, String::from(icon), egui::FontId::proportional(theme::icon::SM + 1.0), icon_color);
+    match driver {
+        Some(d) if theme::is_cartoon() => theme::paint_connector_sticker(ui.painter(), egui::pos2(x + 8.0, cy), 19.0, d, ui.visuals().dark_mode),
+        _ if theme::is_cartoon() => theme::paint_cartoon_icon(ui.painter(), egui::pos2(x + 8.0, cy), 18.0, icon, ui.visuals().dark_mode),
+        _ => {
+            ui.painter().text(egui::pos2(x + 8.0, cy), egui::Align2::CENTER_CENTER, String::from(icon), egui::FontId::proportional(theme::icon::SM + 1.0), icon_color);
+        }
+    }
     x += 22.0;
     let right = rect.right() - 6.0 - trailing;
     let max_w = right - x;
@@ -265,7 +272,8 @@ fn connection_row(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile, ind
     let open = connected && cx.sidebar.is_expanded(id, ROOT);
     let selected = cx.selected_conn == Some(id);
     let trailing = if p.environment.is_protected() { 50.0 } else { 18.0 };
-    let resp = row_with_trailing(ui, indent, connected.then_some(open), crate::views::driver_icon(&p.driver), theme::env_color(ui, p.environment), &p.name, &p.summary(), selected, trailing);
+    let resp =
+        row_with_trailing(ui, indent, connected.then_some(open), crate::views::driver_icon(&p.driver), theme::env_color(ui, p.environment), Some(&p.driver), &p.name, &p.summary(), selected, trailing);
     // Status dot and environment marker drawn over the row's right edge.
     let r = resp.rect;
     ui.painter().circle_filled(egui::pos2(r.right() - 10.0, r.center().y), 4.0, status_color);
@@ -279,15 +287,21 @@ fn connection_row(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile, ind
             cx.sidebar.toggle(id, ROOT);
         }
     }
-    if resp.double_clicked() && !connected {
-        cx.cmd(Cmd::Connect(id));
+    if resp.double_clicked() {
+        if connected {
+            // Both clicks of the double-click toggled the tree, so it is back as it was.
+            crate::views::open_connection(cx, p);
+        } else {
+            cx.cmd(Cmd::Connect(id));
+        }
     }
     resp.context_menu(|ui| connection_menu(ui, cx, p));
     if let Some(ConnState::Failed(e)) = cx.conns.state(id) {
         let msg = e.message.clone();
         ui.horizontal(|ui| {
             ui.add_space(indent + 42.0);
-            ui.label(RichText::new(msg).small().color(t.destructive)).on_hover_text("Double-click the connection to retry");
+            // Truncated to the panel width: a long message must not widen the sidebar.
+            ui.add(egui::Label::new(RichText::new(&msg).small().color(t.destructive)).truncate()).on_hover_text(format!("{msg}\n\nDouble-click the connection to retry"));
         });
     }
     if let Some(ConnState::Connecting { started, .. }) = cx.conns.state(id) {
@@ -322,6 +336,12 @@ fn connection_row(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile, ind
 
 fn connection_menu(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile) {
     let id = p.id;
+    let fav = cx.store.is_favorite(id);
+    if ui.button(ico(ICON_STAR, if fav { "Remove from favourites" } else { "Add to favourites" })).clicked() {
+        cx.store.toggle_favorite(id);
+        cx.mark_dirty();
+        ui.close();
+    }
     let session = cx.conns.session(id).cloned();
     if session.is_some() {
         if let Some(SessionHandle::Sql(s)) = &session {
@@ -445,7 +465,7 @@ fn kv_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, indent: f32) {
         }
         Some(KvChildren::Failed(e)) => {
             let e = e.clone();
-            ui.label(RichText::new(e).small().color(t.destructive));
+            ui.add(egui::Label::new(RichText::new(e.clone()).small().color(t.destructive)).truncate()).on_hover_text(e.clone());
         }
         _ => {
             ui.horizontal(|ui| {
@@ -483,7 +503,7 @@ fn sql_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, parent: Option<(Ob
             let e = e.clone();
             ui.horizontal(|ui| {
                 ui.add_space(indent + 20.0);
-                ui.label(RichText::new(e).small().color(t.destructive));
+                ui.add(egui::Label::new(RichText::new(e.clone()).small().color(t.destructive)).truncate()).on_hover_text(e.clone());
                 if ui.small_button("Retry").clicked() {
                     cx.sidebar.children.remove(&ck);
                 }
@@ -752,7 +772,7 @@ fn resource_children(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, parent: Optio
             let e = e.clone();
             ui.horizontal(|ui| {
                 ui.add_space(indent + 20.0);
-                ui.label(RichText::new(e).small().color(t.destructive));
+                ui.add(egui::Label::new(RichText::new(e.clone()).small().color(t.destructive)).truncate()).on_hover_text(e.clone());
                 if ui.small_button("Retry").clicked() {
                     cx.sidebar.res.remove(&key);
                 }

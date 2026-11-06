@@ -634,6 +634,51 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Explicit FTPS (AUTH TLS): login, list, upload, download, delete over TLS.
+    /// Server: `stilliard/pure-ftpd` with `--tls=2` (TLS required), user ovc/ovcpass on port 52021.
+    async fn live_ftps_explicit() {
+        let mut v = std::collections::BTreeMap::new();
+        v.insert("host".into(), "127.0.0.1".into());
+        v.insert("port".into(), std::env::var("OPENVCLIENT_FTPS_PORT").unwrap_or_else(|_| "52021".into()));
+        v.insert("security".into(), "ftps".into());
+        v.insert("verify_cert".into(), "false".into()); // the test server's certificate is self-signed
+        v.insert("user".into(), "ovc".into());
+        let h = match FtpDriver::default().connect(ConnectParams { values: v.clone(), secret: Some("ovcpass".into()), read_only: false, notifier: None }).await {
+            Ok(h) => h,
+            Err(e) if e.message.contains("refused") || e.message.contains("reach") || e.message.contains("timed out") => {
+                eprintln!("skipping: no FTPS server ({})", e.message);
+                return;
+            }
+            Err(e) => panic!("FTPS connect failed: {} {:?}", e.message, e.detail),
+        };
+        let s = h.resource().unwrap().clone();
+        let home = s.children(None).await.unwrap()[0].id.clone();
+        let file = format!("{home}/ovc_tls.txt").replace("d:", "f:");
+        let _ = s.run_action(&file, "rm", Args::new()).await;
+        let src = std::env::temp_dir().join("ovc_tls.txt");
+        std::fs::write(&src, "hello ftps").unwrap();
+        let mut u = Args::new();
+        u.insert("file".into(), src.display().to_string());
+        s.run_action(&home, "upload", u).await.unwrap();
+        let listing = s.list_dir(Some(&home), "").await.unwrap();
+        assert!(listing.entries.iter().any(|e| e.name == "ovc_tls.txt"), "{:?}", listing.entries.iter().map(|e| &e.name).collect::<Vec<_>>());
+        let out = std::env::temp_dir().join("ovc_tls_down.txt");
+        let _ = std::fs::remove_file(&out);
+        let mut d = Args::new();
+        d.insert("file".into(), out.display().to_string());
+        s.run_action(&file, "download", d).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "hello ftps");
+        s.run_action(&file, "rm", Args::new()).await.unwrap();
+
+        // With certificate checks on, a self-signed certificate is refused.
+        v.insert("verify_cert".into(), "true".into());
+        assert!(
+            FtpDriver::default().connect(ConnectParams { values: v, secret: Some("ovcpass".into()), read_only: false, notifier: None }).await.is_err(),
+            "self-signed certificate must be refused when verifying"
+        );
+    }
+
+    #[tokio::test]
     async fn live_ftp() {
         let mut v = std::collections::BTreeMap::new();
         v.insert("host".into(), "127.0.0.1".into());

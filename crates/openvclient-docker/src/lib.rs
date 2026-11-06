@@ -360,7 +360,8 @@ mod tests {
             return;
         };
         assert_eq!(c.state, "running");
-        assert!(c.ports.contains("56379"), "{}", c.ports);
+        // The container port; the host port depends on how the container was started.
+        assert!(c.ports.contains("6379"), "{}", c.ports);
         let logs = d.logs(&c.id, 50, false).await.unwrap();
         assert!(logs.contains("Ready to accept connections"), "{logs}");
         let st = d.stats(&c.id).await.unwrap();

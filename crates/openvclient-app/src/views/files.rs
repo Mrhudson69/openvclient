@@ -430,7 +430,15 @@ impl FilesTab {
                             ui.add(egui::Label::new(rt).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand)
                         };
                         let at_root = self.cwd.is_none() || (root.is_some() && self.cwd == root && crumbs.len() <= 1);
-                        if link(ui, ico(ICON_CLOUD, &conn_name), at_root && crumbs.is_empty()).clicked() && root.is_none() {
+                        let first = if theme::is_cartoon() {
+                            // Cartoon: the connection's sticker, then its name.
+                            let driver = cx.store.profile(self.conn).map(|p| p.driver.clone()).unwrap_or_default();
+                            crate::views::driver_glyph(ui, &driver, 14.0, t.muted_fg);
+                            conn_name.clone()
+                        } else {
+                            ico(ICON_CLOUD, &conn_name)
+                        };
+                        if link(ui, first, at_root && crumbs.is_empty()).clicked() && root.is_none() {
                             nav = Some(None);
                         }
                         for (i, (id, label)) in crumbs.iter().enumerate() {
@@ -672,7 +680,7 @@ impl FilesTab {
                     row.col(|ui| {
                         let icon = if e.is_dir { if e.kind == "container" || e.kind == "bucket" { ICON_INVENTORY_2 } else { ICON_FOLDER } } else { file_icon(&e.name) };
                         let color = if e.is_dir { t.warning } else { t.info };
-                        ui.label(RichText::new(String::from(icon)).size(18.0).color(color));
+                        crate::views::item_glyph(ui, icon, 18.0, color);
                         ui.add(egui::Label::new(RichText::new(&e.name).color(t.fg)).truncate().selectable(false)).on_hover_text(&e.name);
                     });
                     row.col(|ui| {
@@ -801,7 +809,7 @@ impl FilesTab {
         let Some((e, content)) = self.preview.clone() else { return };
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(String::from(file_icon(&e.name))).size(22.0).color(t.info));
+                crate::views::item_glyph(ui, file_icon(&e.name), 22.0, t.info);
                 ui.add(egui::Label::new(RichText::new(&e.name).strong()).wrap());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button(String::from(ICON_CLOSE)).on_hover_text("Close preview").clicked() {

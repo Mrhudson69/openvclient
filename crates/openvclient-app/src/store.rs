@@ -14,12 +14,28 @@ pub enum ThemeChoice {
     System,
     Dark,
     Light,
+    /// Old single setting for the cartoon look; read from older workspaces
+    /// and turned into `style: Cartoon` with the system mode on load.
+    #[serde(rename = "Cartoon")]
+    LegacyCartoon,
+}
+
+/// Visual style, chosen separately from the light/dark mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThemeStyle {
+    /// The original look.
+    #[default]
+    Original,
+    /// The playful look of openvclient.xyz.
+    Cartoon,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub theme: ThemeChoice,
+    #[serde(default)]
+    pub style: ThemeStyle,
     #[serde(default = "default_rows")]
     pub max_rows: usize,
     #[serde(default = "default_page")]
@@ -56,6 +72,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: ThemeChoice::System,
+            style: ThemeStyle::Original,
             max_rows: default_rows(),
             page_size: default_page(),
             editor_font_size: default_font(),
@@ -78,6 +95,9 @@ pub struct Workspace {
     /// Recently run SQL per connection, newest first.
     #[serde(default)]
     pub history: Vec<HistoryEntry>,
+    /// Connections pinned to Home, in the order they were starred.
+    #[serde(default)]
+    pub favorites: Vec<Uuid>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -158,6 +178,10 @@ impl Store {
         let (ws, load_error) = match std::fs::read(&path) {
             Ok(bytes) => match serde_json::from_slice::<Workspace>(&bytes) {
                 Ok(mut ws) => {
+                    if ws.settings.theme == ThemeChoice::LegacyCartoon {
+                        ws.settings.theme = ThemeChoice::System;
+                        ws.settings.style = ThemeStyle::Cartoon;
+                    }
                     let lost = unseal(&mut ws);
                     let warn =
                         (lost > 0).then(|| format!("{lost} encrypted item(s) in the workspace could not be decrypted (the key in the system keychain is missing or different) and were left out."));
@@ -217,6 +241,19 @@ impl Store {
     pub fn remove(&mut self, id: Uuid) {
         self.ws.profiles.retain(|p| p.id != id);
         self.ws.history.retain(|h| h.profile != id);
+        self.ws.favorites.retain(|f| *f != id);
+    }
+
+    pub fn is_favorite(&self, id: Uuid) -> bool {
+        self.ws.favorites.contains(&id)
+    }
+
+    pub fn toggle_favorite(&mut self, id: Uuid) {
+        if self.is_favorite(id) {
+            self.ws.favorites.retain(|f| *f != id);
+        } else {
+            self.ws.favorites.push(id);
+        }
     }
 
     /// Every folder path, including parents of nested folders.
