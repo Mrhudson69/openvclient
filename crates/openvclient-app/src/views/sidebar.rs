@@ -287,8 +287,13 @@ fn connection_row(ui: &mut egui::Ui, cx: &mut AppCtx, p: &ConnectionProfile, ind
             cx.sidebar.toggle(id, ROOT);
         }
     }
-    if resp.double_clicked() && !connected {
-        cx.cmd(Cmd::Connect(id));
+    if resp.double_clicked() {
+        if connected {
+            // Both clicks of the double-click toggled the tree, so it is back as it was.
+            crate::views::open_connection(cx, p);
+        } else {
+            cx.cmd(Cmd::Connect(id));
+        }
     }
     resp.context_menu(|ui| connection_menu(ui, cx, p));
     if let Some(ConnState::Failed(e)) = cx.conns.state(id) {

@@ -88,6 +88,23 @@ pub fn item_glyph(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, color: egui:
     }
 }
 
+/// Open a connected connection's main view: the SQL editor for databases, the
+/// key browser for Redis, the file manager or service view for storage and
+/// services, the containers list for Docker.
+pub fn open_connection(cx: &mut crate::app::AppCtx, p: &openvclient_core::ConnectionProfile) {
+    use crate::app::Cmd;
+    use openvclient_core::SessionHandle;
+    let id = p.id;
+    let cmd = match cx.conns.session(id) {
+        Some(SessionHandle::Sql(_)) => Cmd::NewSql { conn: id, database: None, text: String::new() },
+        Some(SessionHandle::KeyValue(_)) => Cmd::OpenRedis { conn: id, db: p.param("db").parse().unwrap_or(0) },
+        Some(SessionHandle::Containers(_)) => Cmd::OpenDocker { conn: id, section: crate::views::docker::Section::Containers },
+        Some(SessionHandle::Resource(_)) => Cmd::OpenResource { conn: id, node: None, action: None },
+        None => Cmd::Connect(id),
+    };
+    cx.cmd(cmd);
+}
+
 /// Human name of a connector, e.g. "PostgreSQL".
 pub fn driver_label(cx: &crate::app::AppCtx, driver: &str) -> String {
     cx.conns.registry.get(driver).map(|d| d.info().name.to_string()).unwrap_or_else(|| driver.to_string())

@@ -145,11 +145,10 @@ fn connection_card(ui: &mut egui::Ui, cx: &mut AppCtx, p: &openvclient_core::Con
     let resp = resp.on_hover_text(format!("{} · {}", p.name, p.environment.label()));
     if resp.clicked() {
         cx.selected_conn = Some(p.id);
-        match cx.conns.session(p.id) {
-            Some(h) if h.sql().is_some() => cx.cmd(Cmd::NewSql { conn: p.id, database: None, text: String::new() }),
-            Some(h) if h.kv().is_some() => cx.cmd(Cmd::OpenRedis { conn: p.id, db: p.param("db").parse().unwrap_or(0) }),
-            Some(_) => cx.cmd(Cmd::OpenDocker { conn: p.id, section: crate::views::docker::Section::Containers }),
-            None => cx.cmd(Cmd::Connect(p.id)),
+        if cx.conns.session(p.id).is_some() {
+            crate::views::open_connection(cx, p);
+        } else {
+            cx.cmd(Cmd::Connect(p.id));
         }
     }
 }

@@ -1570,6 +1570,18 @@ mod walkthrough {
         h.state_mut().cx.cmd(Cmd::Connect(id));
         settle(&mut h, |a| a.cx.conns.is_connected(id), Duration::from_secs(15));
         let s = h.state().cx.conns.session(id).and_then(|x| x.resource()).cloned().expect("azurite session");
+        // Opening a connected storage connection (home card click, sidebar
+        // double-click) must open the file manager, not the Docker view.
+        {
+            let app = h.state_mut();
+            let p = app.cx.store.profile(id).cloned().unwrap();
+            crate::views::open_connection(&mut app.cx, &p);
+        }
+        for _ in 0..4 {
+            h.step();
+        }
+        assert!(h.state().find(|t| matches!(t.kind, TabKind::Files(_))).is_some(), "storage connection should open the file manager");
+        assert!(h.state().find(|t| matches!(t.kind, TabKind::Docker(..))).is_none(), "storage connection must not open the Docker view");
 
         // Seed: a container with folders and a few typical files.
         let dir = std::env::temp_dir().join("ovc-files-shots");
