@@ -97,6 +97,18 @@ impl TerminalTab {
         for e in events {
             match e {
                 egui::Event::Text(t) => self.send(t.into_bytes()),
+                // On Windows and Linux the clipboard shortcuts use Ctrl, so egui-winit
+                // turns Ctrl+C / Ctrl+X into Copy / Cut and never sends the key. In a
+                // terminal those must reach the shell (interrupt, nano's exit).
+                // Copying the screen stays on the "Copy screen" button.
+                egui::Event::Copy if !cfg!(target_os = "macos") => {
+                    self.scroll = 0;
+                    self.send([0x03]);
+                }
+                egui::Event::Cut if !cfg!(target_os = "macos") => {
+                    self.scroll = 0;
+                    self.send([0x18]);
+                }
                 egui::Event::Paste(t) => {
                     if bracketed {
                         self.send([b"\x1b[200~".as_slice(), t.as_bytes(), b"\x1b[201~"].concat());

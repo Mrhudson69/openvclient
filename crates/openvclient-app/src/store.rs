@@ -101,6 +101,8 @@ pub fn restrict(path: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
+    // Windows: the config dir lives under %APPDATA%, whose inherited ACL already
+    // limits access to this account (plus SYSTEM and Administrators).
     #[cfg(not(unix))]
     let _ = path;
 }

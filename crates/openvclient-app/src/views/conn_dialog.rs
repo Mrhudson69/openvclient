@@ -484,7 +484,12 @@ impl ConnDialog {
                         }
                         "agent" => {
                             ui.label("");
-                            ui.label(RichText::new("Uses the keys loaded in your SSH agent (SSH_AUTH_SOCK).").small().color(t.muted_fg));
+                            let agent_hint = if cfg!(windows) {
+                                "Uses the keys loaded in the Windows OpenSSH agent (ssh-agent service), or in Pageant."
+                            } else {
+                                "Uses the keys loaded in your SSH agent (SSH_AUTH_SOCK)."
+                            };
+                            ui.label(RichText::new(agent_hint).small().color(t.muted_fg));
                             ui.end_row();
                         }
                         _ => {

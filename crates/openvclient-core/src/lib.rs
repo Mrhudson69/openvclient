@@ -12,6 +12,7 @@ pub mod driver;
 pub mod error;
 pub mod explain;
 pub mod kv;
+pub mod process;
 pub mod profile;
 pub mod registry;
 pub mod resource;

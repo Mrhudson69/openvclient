@@ -124,7 +124,7 @@ Installers are produced by the release workflow (see [docs/RELEASE_PLAN.md](docs
 | Platform | Command | Result |
 |----------|---------|--------|
 | macOS | `./scripts/package-macos-dmg.sh` | `dist/OpenVClient-<version>-macos-<arch>.dmg`: open it and drag OpenVClient onto Applications |
-| Windows | `.\scripts\bundle-windows.ps1` (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)) | `dist\OpenVClient-<version>-windows-x64-setup.exe`: a setup wizard (licence, per-user or all users, folder, shortcuts, launch) plus a portable zip |
+| Windows | `.\scripts\bundle-windows.ps1` (needs [Inno Setup 6.6+](https://jrsoftware.org/isinfo.php)) | `dist\OpenVClient-<version>-windows-x64-setup.exe`: a setup wizard (per-user or all users, licence, folder, Start menu, desktop shortcut, launch; light or dark to match Windows) plus a portable zip |
 | Linux | `./scripts/bundle-linux.sh` | `.deb`, `.rpm`, AppImage and a tar.gz with `install.sh`; all add a menu entry and icon |
 
 Builds that are not signed with an Apple Developer ID / Windows code-signing certificate show a first-run warning (macOS: right-click → Open; Windows SmartScreen: More info → Run anyway). The release workflow signs and notarizes when the signing secrets are configured.
@@ -136,7 +136,7 @@ To build from source:
 ### Prerequisites (all platforms)
 - **Rust 1.95 or newer** (edition 2024). Install it with [rustup](https://rustup.rs).
 - A GPU driver with OpenGL 3.x or newer. The app renders with `glow` (OpenGL).
-- Optional: `pg_dump`/`pg_restore`, `mysqldump`/`mariadb-dump`/`mysql` on `PATH` for backup and restore. The Azure CLI (`az`) is used by `entra_default`.
+- Optional: `pg_dump`/`pg_restore`, `mysqldump`/`mariadb-dump`/`mysql` on `PATH` for backup and restore (on Windows the default install folders under Program Files are searched too). The Azure CLI (`az`) is used by `entra_default`.
 
 ### macOS
 ```sh
@@ -150,16 +150,17 @@ cargo run --release             # or build the app bundle:
 OpenVClient needs macOS 11 or later. TLS for PostgreSQL, MySQL and Redis uses the system Security framework.
 
 ### Windows
-1. Install the [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the **Desktop development with C++** workload (MSVC and the Windows SDK).
+1. Install the [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the **Desktop development with C++** workload (MSVC and the Windows SDK; `rc.exe` embeds the app icon).
 2. Install Rust with `rustup-init.exe` (the default `x86_64-pc-windows-msvc` toolchain).
-3. Build:
+3. For the installer only: Inno Setup 6.6 or newer (`winget install JRSoftware.InnoSetup`).
+4. Build:
    ```powershell
    git clone https://github.com/Mrhudson69/openvclient.git
    cd openvclient
    cargo run --release
    # or: .\scripts\bundle-windows.ps1   -> setup.exe installer + portable zip in dist\
    ```
-Windows builds are the only builds that support SQL Server `windows` and `integrated` authentication (SSPI). TLS uses SChannel.
+Windows builds are the only builds that support SQL Server `windows` and `integrated` authentication (SSPI). TLS uses SChannel. SSH agent authentication uses the Windows OpenSSH agent (`ssh-agent` service) and falls back to Pageant. Rendering uses OpenGL (`glow`); where OpenGL 2+ is missing — Remote Desktop sessions, virtual machines with the Basic Display Adapter, very old drivers — the app automatically retries with Direct3D 12 through `wgpu`, which falls back to WARP software rendering. Backup and restore find `pg_dump`/`mysqldump` on `PATH` or in the default install folders (`C:\Program Files\PostgreSQL\<version>\bin`, `C:\Program Files\MySQL\MySQL Server <version>\bin`, `C:\Program Files\MariaDB <version>\bin`).
 
 ### Linux
 Install the build dependencies first. eframe and winit need X11 and Wayland headers. PostgreSQL, MySQL and Redis TLS uses OpenSSL (through `native-tls`), so the OpenSSL headers are required.
@@ -216,7 +217,7 @@ All profiles, folders and settings live in `workspace.json` in this directory. S
 | OS | Location |
 |---|---|
 | macOS | `~/Library/Application Support/dev.OpenVClient.OpenVClient/` |
-| Windows | `%APPDATA%\OpenVClient\OpenVClient\config\` |
+| Windows | `%APPDATA%\OpenVClient\OpenVClient\config\` (the uninstaller offers to remove `%APPDATA%\OpenVClient`) |
 | Linux | `$XDG_CONFIG_HOME/openvclient/` (usually `~/.config/openvclient/`) |
 
 Settings → *Workspace file* shows the exact path on your machine. If `workspace.json` cannot be read, OpenVClient keeps a copy as `workspace.broken-<timestamp>.json` and starts with an empty workspace. It never overwrites the broken file silently.

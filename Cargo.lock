@@ -4609,6 +4609,7 @@ dependencies = [
  "openvclient-sqlserver",
  "openvclient-storage",
  "parking_lot 0.13.0",
+ "raw-window-handle",
  "reqwest",
  "rfd",
  "serde",
@@ -4618,6 +4619,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vt100",
+ "windows-sys 0.61.2",
  "winresource",
 ]
 

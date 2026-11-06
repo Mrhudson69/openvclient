@@ -394,9 +394,22 @@ pub fn client_tools(mariadb: bool) -> &'static [&'static str] {
 
 pub fn find_tool(names: &[&str]) -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    for extra in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/usr/local/mysql/bin", "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin"] {
+    for extra in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/usr/local/mysql/bin"] {
         dirs.push(PathBuf::from(extra));
     }
+    // Windows installers use versioned folders that are not on PATH:
+    // C:\Program Files\MySQL\MySQL Server 8.4\bin, C:\Program Files\MariaDB 11.4\bin.
+    // Scanned once, because capabilities() (and so this function) runs every frame.
+    static WINDOWS_DIRS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    dirs.extend(
+        WINDOWS_DIRS
+            .get_or_init(|| {
+                use openvclient_core::process::{program_files, versioned_bin_dirs};
+                program_files().iter().flat_map(|pf| [versioned_bin_dirs(&pf.join("MySQL"), "MySQL Server "), versioned_bin_dirs(pf, "MariaDB ")].concat()).collect()
+            })
+            .iter()
+            .cloned(),
+    );
     for n in names {
         let exe = if cfg!(windows) { format!("{n}.exe") } else { n.to_string() };
         if let Some(p) = dirs.iter().map(|d| d.join(&exe)).find(|p| p.is_file()) {
@@ -426,8 +439,14 @@ impl OptionFile {
             let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
             f.write_all(body.as_bytes())?;
         }
+        // Windows: %TEMP% is inside the user profile, whose ACL already limits
+        // it to this account. create_new refuses to reuse a planted file.
         #[cfg(not(unix))]
-        std::fs::write(&path, body)?;
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&path)?;
+            f.write_all(body.as_bytes())?;
+        }
         Ok(Self(path))
     }
 }
@@ -448,7 +467,7 @@ pub async fn backup(s: &MySession, req: BackupRequest) -> Result<String> {
     let tool = find_tool(names).ok_or_else(|| Error::unsupported(format!("{} was not found on PATH", names[0])))?;
     let opt = OptionFile::new(s)?;
     let t = Instant::now();
-    let out = tokio::process::Command::new(&tool)
+    let out = openvclient_core::process::command(&tool)
         .arg(format!("--defaults-extra-file={}", opt.0.display()))
         .args(["--single-transaction", "--routines", "--triggers", "--events", "--hex-blob"])
         .arg(format!("--result-file={}", req.path.display()))
@@ -485,7 +504,7 @@ pub async fn restore(s: &MySession, req: BackupRequest) -> Result<String> {
     let opt = OptionFile::new(s)?;
     let input = std::fs::File::open(&req.path)?;
     let t = Instant::now();
-    let out = tokio::process::Command::new(&tool)
+    let out = openvclient_core::process::command(&tool)
         .arg(format!("--defaults-extra-file={}", opt.0.display()))
         .arg(&db)
         .stdin(input)

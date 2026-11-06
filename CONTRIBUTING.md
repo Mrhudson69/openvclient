@@ -355,6 +355,8 @@ OPENVCLIENT_CONFIG_DIR=/tmp/ovc-ws OPENVCLIENT_SHOTS=/tmp/ovc-shots \
   cargo test -p openvclient-app ui_walkthrough -- --ignored --nocapture
 ```
 - It is `#[ignore]` by default because it needs seeded services and a workspace.
+- `OPENVCLIENT_SHOTS_SIZE=1100x660` renders at another window size (default `1440x900`), to check layout near the minimum window size.
+- On Windows (PowerShell): `$env:OPENVCLIENT_CONFIG_DIR="C:\ovc-ws"; $env:OPENVCLIENT_SHOTS="C:\ovc-shots"; cargo test -p openvclient-app ui_walkthrough -- --ignored --nocapture`.
 - Demo data: `demo/shop.db` (SQLite) and a demo database on the local Postgres. The test reads `OPENVCLIENT_DEMO_DB` and falls back to `openv_demo` if it isn't set.
 - Large and strong text can look faint in kittest renders even though it looks fine in the real window. Don't chase that.
 

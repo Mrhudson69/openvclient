@@ -150,9 +150,13 @@ impl ProxySpec {
     }
 }
 
+/// Expand a leading `~` to the home directory. Windows has no `HOME` by
+/// default, so fall back to `USERPROFILE` and accept `~\` as well as `~/`.
 fn expand(p: &str) -> String {
-    match (p.strip_prefix("~/"), std::env::var("HOME")) {
-        (Some(rest), Ok(home)) => format!("{home}/{rest}"),
+    let rest = p.strip_prefix("~/").or_else(|| if cfg!(windows) { p.strip_prefix("~\\") } else { None });
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty()).or_else(|| if cfg!(windows) { std::env::var("USERPROFILE").ok() } else { None });
+    match (rest, home) {
+        (Some(rest), Some(home)) => std::path::Path::new(&home).join(rest).display().to_string(),
         _ => p.to_string(),
     }
 }
@@ -452,8 +456,11 @@ async fn agent_auth(session: &mut client::Handle<HostKeyCheck>, user: &str) -> R
     if let Ok(a) = russh::keys::agent::client::AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent").await {
         return agent_try(session, user, a).await;
     }
-    let a = russh::keys::agent::client::AgentClient::connect_pageant().await.map_err(|e| Error::connection(format!("No SSH agent or Pageant running: {e}")))?;
-    agent_try(session, user, a).await
+    let none = |e: String| Error::connection("No SSH agent is running. Start the \"OpenSSH Authentication Agent\" service (ssh-agent) and add your key with ssh-add, or run Pageant.").with_detail(e);
+    // connect_pageant() succeeds even when Pageant is not running; the first
+    // request then fails with "early eof", so map that to the same message.
+    let a = russh::keys::agent::client::AgentClient::connect_pageant().await.map_err(|e| none(e.to_string()))?;
+    agent_try(session, user, a).await.map_err(|e| if e.kind == openvclient_core::ErrorKind::Connection && e.message.starts_with("SSH agent:") { none(e.message) } else { e })
 }
 
 async fn agent_try<S: russh::keys::agent::client::AgentStream + Send + Unpin + 'static>(

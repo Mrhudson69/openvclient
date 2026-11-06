@@ -394,6 +394,13 @@ pub struct OpenvApp {
     tree: Tree<Tab>,
     focused: Option<TileId>,
     cx: AppCtx,
+    /// Minimum window size last sent for the current monitor.
+    min_window: egui::Vec2,
+    /// Whether the start-up size has been checked against the monitor.
+    window_fitted: bool,
+    /// Windows: whether the end-session hook has been attempted.
+    #[cfg(windows)]
+    session_hooked: bool,
 }
 
 impl OpenvApp {
@@ -428,7 +435,15 @@ impl OpenvApp {
             cx.toasts.error_text("Workspace could not be loaded", e);
         }
         let tree = Tree::new_tabs(egui::Id::unique("workspace"), vec![Tab { id: 1, kind: TabKind::Home }]);
-        Self { tree, focused: None, cx }
+        Self {
+            tree,
+            focused: None,
+            cx,
+            min_window: egui::Vec2::from(crate::MIN_WINDOW),
+            window_fitted: false,
+            #[cfg(windows)]
+            session_hooked: false,
+        }
     }
 
     fn find(&self, pred: impl Fn(&Tab) -> bool) -> Option<TileId> {
@@ -788,7 +803,8 @@ impl OpenvApp {
                 ui.heading("Trust this SSH server?");
             });
             ui.add_space(theme::space::SM);
-            ui.add(egui::Label::new(format!("{name} is connecting to {} for the first time. Its identity is not in ~/.ssh/known_hosts and has not been trusted before.", p.host)).wrap());
+            let known_hosts = if cfg!(windows) { r"%USERPROFILE%\.ssh\known_hosts" } else { "~/.ssh/known_hosts" };
+            ui.add(egui::Label::new(format!("{name} is connecting to {} for the first time. Its identity is not in {known_hosts} and has not been trusted before.", p.host)).wrap());
             ui.add_space(theme::space::SM);
             egui::Frame::new().fill(t.muted).corner_radius(6.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
                 ui.label(RichText::new("Host key fingerprint (SHA-256)").small().color(t.muted_fg));
@@ -983,14 +999,10 @@ impl OpenvApp {
                 ui.add(egui::Label::new(RichText::new(format!("Logs: {}", logs.display())).small().color(t.muted_fg)).wrap());
                 ui.horizontal(|ui| {
                     if ui.small_button(ico(ICON_FOLDER_OPEN, "Open logs folder")).clicked() {
-                        let opener = if cfg!(target_os = "macos") {
-                            "open"
-                        } else if cfg!(windows) {
-                            "explorer"
-                        } else {
-                            "xdg-open"
-                        };
-                        let _ = std::process::Command::new(opener).arg(&logs).spawn();
+                        // The folder may not exist yet (nothing logged); file managers
+                        // then open somewhere unrelated, so create it first.
+                        let _ = std::fs::create_dir_all(&logs);
+                        crate::update::open_url(&logs.display().to_string());
                     }
                 });
             });
@@ -1107,9 +1119,45 @@ impl OpenvApp {
     }
 }
 
+impl OpenvApp {
+    /// Keep the window usable on small screens. The 1100×700 minimum and the
+    /// 1440×900 first-run size do not fit a 1366×768 laptop, or 1920×1080 at
+    /// 150 % (1280×720 logical): the window would extend under the taskbar.
+    /// There, lower the minimum to what fits and start maximized. Large
+    /// monitors keep the normal limits. No-op until the monitor size is known.
+    fn fit_window_to_monitor(&mut self, ctx: &egui::Context) {
+        let (monitor, inner, maximized) = ctx.input(|i| (i.viewport().monitor_size, i.viewport().inner_rect.map(|r| r.size()), i.viewport().maximized.unwrap_or(false)));
+        let Some(monitor) = monitor.filter(|m| m.x > 0.0 && m.y > 0.0) else { return };
+        // Room for the title bar, borders and the taskbar or dock.
+        let usable = monitor - egui::vec2(16.0, 120.0);
+        let min = egui::Vec2::from(crate::MIN_WINDOW).min(usable).max(egui::vec2(800.0, 480.0));
+        if min != self.min_window {
+            self.min_window = min;
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
+        }
+        if !self.window_fitted
+            && let Some(inner) = inner
+        {
+            self.window_fitted = true;
+            if !maximized && (inner.x > usable.x || inner.y > usable.y) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
+        }
+    }
+}
+
 impl eframe::App for OpenvApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        #[cfg(windows)]
+        if !self.session_hooked {
+            self.session_hooked = true;
+            if !crate::winsession::install(_frame) {
+                // Headless tests have no native window; a real window always does.
+                tracing::debug!(target: "openvclient", "no native window: end-session hook not installed");
+            }
+        }
+        self.fit_window_to_monitor(&ctx);
         self.handle_events();
         self.poll_updates(&ctx);
         self.shortcuts(&ctx);
@@ -1221,7 +1269,12 @@ mod walkthrough {
         std::fs::create_dir_all(&out).unwrap();
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         let handle = rt.handle().clone();
-        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_pixels_per_point(1.5).with_max_steps(64).build_eframe(move |cc| {
+        // OPENVCLIENT_SHOTS_SIZE=1100x660 checks layout at a small window (default 1440x900).
+        let size = std::env::var("OPENVCLIENT_SHOTS_SIZE")
+            .ok()
+            .and_then(|s| s.split_once('x').and_then(|(w, h)| Some(egui::vec2(w.trim().parse().ok()?, h.trim().parse().ok()?))))
+            .unwrap_or(egui::vec2(1440.0, 900.0));
+        let mut h = Harness::builder().with_size(size).with_pixels_per_point(1.5).with_max_steps(64).build_eframe(move |cc| {
             theme::install(&cc.egui_ctx);
             OpenvApp::new(&cc.egui_ctx, handle, crate::registry())
         });
@@ -1234,7 +1287,8 @@ mod walkthrough {
             h.state_mut().cx.cmd(Cmd::Connect(*id));
         }
         let ok = settle(&mut h, |a| ids.iter().all(|i| !a.cx.conns.is_connecting(*i) && a.cx.conns.state(*i).is_some()), Duration::from_secs(20));
-        assert!(ok, "connections did not finish");
+        let pending: Vec<String> = ids.iter().filter(|i| h.state().cx.conns.is_connecting(**i) || h.state().cx.conns.state(**i).is_none()).map(|i| h.state().cx.profile_name(*i)).collect();
+        assert!(ok, "connections did not finish: {pending:?}");
         for id in &ids {
             let name = h.state().cx.profile_name(*id);
             match h.state().cx.conns.state(*id) {

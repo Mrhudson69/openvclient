@@ -243,24 +243,25 @@ pub async fn drop_object(s: &PgSession, kind: ObjectKind, path: &ObjPath, cascad
 pub fn find_tool(name: &str) -> Option<PathBuf> {
     let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    for extra in [
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-        "/usr/bin",
-        "/Applications/Postgres.app/Contents/Versions/latest/bin",
-        "/usr/lib/postgresql/17/bin",
-        "/usr/lib/postgresql/16/bin",
-        "C:\\Program Files\\PostgreSQL\\17\\bin",
-        "C:\\Program Files\\PostgreSQL\\16\\bin",
-    ] {
+    for extra in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/Applications/Postgres.app/Contents/Versions/latest/bin", "/usr/lib/postgresql/17/bin", "/usr/lib/postgresql/16/bin"] {
         dirs.push(PathBuf::from(extra));
     }
+    // Windows: the EDB installer uses C:\Program Files\PostgreSQL\<version>\bin
+    // and does not add it to PATH. Newest version first. Scanned once, because
+    // capabilities() (and so this function) runs every frame.
+    static WINDOWS_DIRS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    dirs.extend(
+        WINDOWS_DIRS
+            .get_or_init(|| openvclient_core::process::program_files().iter().flat_map(|pf| openvclient_core::process::versioned_bin_dirs(&pf.join("PostgreSQL"), "")).collect())
+            .iter()
+            .cloned(),
+    );
     dirs.into_iter().map(|d| d.join(&exe)).find(|p| p.is_file())
 }
 
 fn tool_command(s: &PgSession, tool: &str) -> Result<tokio::process::Command> {
     let path = find_tool(tool).ok_or_else(|| Error::unsupported(format!("{tool} was not found on PATH. Install the PostgreSQL client tools.")))?;
-    let mut cmd = tokio::process::Command::new(path);
+    let mut cmd = openvclient_core::process::command(path);
     cmd.arg("-h").arg(&s.target.host).arg("-p").arg(s.target.port.to_string()).arg("-U").arg(&s.target.user);
     cmd.env("PGSSLMODE", &s.target.sslmode).env("PGAPPNAME", "OpenVClient");
     if let Some(pw) = &s.target.password {
