@@ -75,6 +75,19 @@ pub fn driver_glyph(ui: &mut egui::Ui, driver: &str, size: f32, color: egui::Col
     }
 }
 
+/// An item icon: the line icon in the original themes, its cartoon drawing in
+/// the cartoon theme.
+pub fn item_glyph(ui: &mut egui::Ui, icon: MaterialIcon, size: f32, color: egui::Color32) -> egui::Response {
+    if theme::is_cartoon() {
+        let s = size + 2.0;
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(s, s), egui::Sense::hover());
+        theme::paint_cartoon_icon(ui.painter(), rect.center(), s, icon, ui.visuals().dark_mode);
+        resp
+    } else {
+        ui.label(RichText::new(String::from(icon)).size(size).color(color))
+    }
+}
+
 /// Human name of a connector, e.g. "PostgreSQL".
 pub fn driver_label(cx: &crate::app::AppCtx, driver: &str) -> String {
     cx.conns.registry.get(driver).map(|d| d.info().name.to_string()).unwrap_or_else(|| driver.to_string())

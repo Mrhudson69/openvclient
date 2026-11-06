@@ -228,6 +228,7 @@ fn row_with_trailing(
     x += 16.0;
     match driver {
         Some(d) if theme::is_cartoon() => theme::paint_connector_sticker(ui.painter(), egui::pos2(x + 8.0, cy), 19.0, d, ui.visuals().dark_mode),
+        _ if theme::is_cartoon() => theme::paint_cartoon_icon(ui.painter(), egui::pos2(x + 8.0, cy), 18.0, icon, ui.visuals().dark_mode),
         _ => {
             ui.painter().text(egui::pos2(x + 8.0, cy), egui::Align2::CENTER_CENTER, String::from(icon), egui::FontId::proportional(theme::icon::SM + 1.0), icon_color);
         }

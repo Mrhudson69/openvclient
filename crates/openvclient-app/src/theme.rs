@@ -504,3 +504,103 @@ pub fn wordmark(ui: &mut egui::Ui, size: f32) -> egui::Response {
     job.append("Client", 0.0, fmt(t.fg));
     ui.add(egui::Label::new(job).selectable(false))
 }
+
+/// Cartoon version of a line icon, drawn in code in the website's style (ink
+/// outline, pop fill). Folders, containers, databases, tables and files get
+/// their own drawings; any other icon becomes a small sticker tile with the
+/// glyph in ink. Decorative: callers always draw the item's name next to it.
+pub fn paint_cartoon_icon(painter: &egui::Painter, center: egui::Pos2, size: f32, icon: egui_material_icons::MaterialIcon, dark: bool) {
+    use egui::{Pos2, Rect, Shape, pos2, vec2};
+    use egui_material_icons::icons::*;
+    let g = String::from(icon);
+    let is = |i: egui_material_icons::MaterialIcon| String::from(i) == g;
+    let ink = if dark { hard_shadow(true) } else { pop::INK };
+    let line = Stroke::new((size * 0.09).clamp(1.2, 2.4), ink);
+    let s = size;
+    let o = center - vec2(s / 2.0, s / 2.0);
+    let at = |x: f32, y: f32| -> Pos2 { o + vec2(x * s, y * s) };
+    let rect = |x0: f32, y0: f32, x1: f32, y1: f32| Rect::from_min_max(at(x0, y0), at(x1, y1));
+    let rad = (s * 0.12).round() as u8;
+
+    if is(ICON_FOLDER) || is(ICON_FOLDER_OPEN) || is(ICON_FOLDER_SHARED) || is(ICON_FOLDER_ZIP) {
+        // Folder: a tab at the back, then the body.
+        painter.rect(rect(0.08, 0.16, 0.5, 0.42), rad, pop::YELLOW, line, egui::StrokeKind::Middle);
+        painter.rect(rect(0.08, 0.28, 0.92, 0.84), rad, pop::YELLOW, line, egui::StrokeKind::Middle);
+        if is(ICON_FOLDER_ZIP) {
+            painter.line_segment([at(0.5, 0.34), at(0.5, 0.78)], Stroke::new(line.width, ink));
+        }
+        return;
+    }
+    if is(ICON_INVENTORY_2) || is(ICON_INVENTORY) {
+        // Container / bucket: a teal box with a lid and a handle slot.
+        painter.rect(rect(0.14, 0.36, 0.86, 0.86), rad, pop::TEAL_L, line, egui::StrokeKind::Middle);
+        painter.rect(rect(0.08, 0.16, 0.92, 0.38), rad, Color32::from_rgb(0x4e, 0xcd, 0xc4), line, egui::StrokeKind::Middle);
+        painter.line_segment([at(0.4, 0.54), at(0.6, 0.54)], Stroke::new(line.width * 1.2, ink));
+        return;
+    }
+    if is(ICON_DATABASE) || is(ICON_STORAGE) || is(ICON_DNS) {
+        // Database: a blue cylinder.
+        let (l, r, top, bot, ry) = (0.16, 0.84, 0.26, 0.76, 0.12);
+        painter.add(Shape::ellipse_filled(at(0.5, bot), vec2(0.34 * s, ry * s), pop::BLUE_L));
+        painter.rect_filled(rect(l, top, r, bot), 0, pop::BLUE_L);
+        painter.add(Shape::ellipse_stroke(at(0.5, bot), vec2(0.34 * s, ry * s), line));
+        painter.rect_filled(rect(l + 0.02, top, r - 0.02, bot), 0, pop::BLUE_L);
+        painter.line_segment([at(l, top), at(l, bot)], line);
+        painter.line_segment([at(r, top), at(r, bot)], line);
+        painter.add(Shape::ellipse_filled(at(0.5, top), vec2(0.34 * s, ry * s), Color32::from_rgb(0xc4, 0xd6, 0xfa)));
+        painter.add(Shape::ellipse_stroke(at(0.5, top), vec2(0.34 * s, ry * s), line));
+        return;
+    }
+    if is(ICON_TABLE) || is(ICON_TABLE_VIEW) || is(ICON_TABLE_CHART) || is(ICON_VIEW_COLUMN) {
+        // Table: a white card with a coloured header row and grid lines.
+        let card = rect(0.1, 0.16, 0.9, 0.84);
+        painter.rect_filled(card, rad, Color32::WHITE);
+        painter.rect_filled(rect(0.1, 0.16, 0.9, 0.38), egui::CornerRadius { nw: rad, ne: rad, sw: 0, se: 0 }, if is(ICON_TABLE_CHART) { pop::GREEN } else { pop::BLUE_L });
+        let thin = Stroke::new(line.width * 0.6, ink);
+        painter.line_segment([at(0.1, 0.61), at(0.9, 0.61)], thin);
+        painter.line_segment([at(0.5, 0.38), at(0.5, 0.84)], thin);
+        painter.line_segment([at(0.1, 0.38), at(0.9, 0.38)], line);
+        painter.rect_stroke(card, rad, line, egui::StrokeKind::Middle);
+        return;
+    }
+    let page = [
+        (ICON_DESCRIPTION, Color32::WHITE),
+        (ICON_DRAFT, Color32::WHITE),
+        (ICON_IMAGE, pop::PINK_L),
+        (ICON_DATA_OBJECT, pop::TEAL_L),
+        (ICON_PICTURE_AS_PDF, pop::CORAL_L),
+        (ICON_MOVIE, pop::CORAL_L),
+        (ICON_AUDIO_FILE, pop::PINK_L),
+        (ICON_CODE, pop::BLUE_L),
+    ];
+    if let Some((_, band)) = page.iter().find(|(i, _)| is(*i)) {
+        // File: a page with a folded corner; the band colour gives the type.
+        let pts = vec![at(0.2, 0.1), at(0.6, 0.1), at(0.8, 0.3), at(0.8, 0.9), at(0.2, 0.9)];
+        painter.add(Shape::convex_polygon(pts.clone(), Color32::WHITE, Stroke::NONE));
+        if *band != Color32::WHITE {
+            painter.rect_filled(rect(0.2, 0.56, 0.8, 0.9), egui::CornerRadius::ZERO, *band);
+        }
+        painter.add(Shape::closed_line(pts, line));
+        painter.add(Shape::convex_polygon(vec![at(0.6, 0.1), at(0.8, 0.3), at(0.6, 0.3)], pop::YELLOW_L, line));
+        if *band == Color32::WHITE {
+            let thin = Stroke::new(line.width * 0.6, ink);
+            painter.line_segment([at(0.32, 0.5), at(0.68, 0.5)], thin);
+            painter.line_segment([at(0.32, 0.66), at(0.68, 0.66)], thin);
+        }
+        return;
+    }
+    // Anything else: a little sticker tile with the glyph in ink.
+    let tile = rect(0.06, 0.06, 0.94, 0.94);
+    let fill = if is(ICON_KEY) || is(ICON_LOCK) {
+        pop::YELLOW_L
+    } else if is(ICON_FUNCTIONS) || is(ICON_SCHEDULE) || is(ICON_BOLT) {
+        pop::PINK_L
+    } else if is(ICON_PERSON) || is(ICON_GROUP) {
+        pop::CORAL_L
+    } else {
+        pop::TEAL_L
+    };
+    painter.rect(tile, rad + 1, fill, Stroke::new(line.width * 0.8, ink), egui::StrokeKind::Inside);
+    painter.text(tile.center(), egui::Align2::CENTER_CENTER, g, FontId::proportional(s * 0.66), pop::INK);
+    let _ = pos2;
+}

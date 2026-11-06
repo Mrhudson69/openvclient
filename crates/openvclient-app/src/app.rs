@@ -1634,6 +1634,18 @@ mod walkthrough {
         shot(&mut h, &out, "f4-files-light");
         h.state_mut().cx.show_about = true;
         shot(&mut h, &out, "f5-about");
+        h.state_mut().cx.show_about = false;
+        theme::set_cartoon(&h.ctx, true);
+        shot(&mut h, &out, "f6-files-cartoon-day");
+        h.ctx.set_theme(egui::Theme::Dark);
+        shot(&mut h, &out, "f7-files-cartoon-night");
+        let up = Node::new("c/analytics-exports", "analytics-exports", "container", NodeIcon::Bucket).folder();
+        h.state_mut().cx.cmd(Cmd::OpenResource { conn: id, node: Some(up), action: None });
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "f8-folders-cartoon-night");
         drop(h);
         rt.shutdown_timeout(Duration::from_secs(1));
     }
