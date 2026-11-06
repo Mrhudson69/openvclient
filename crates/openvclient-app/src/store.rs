@@ -80,6 +80,9 @@ pub struct Workspace {
     /// Recently run SQL per connection, newest first.
     #[serde(default)]
     pub history: Vec<HistoryEntry>,
+    /// Connections pinned to Home, in the order they were starred.
+    #[serde(default)]
+    pub favorites: Vec<Uuid>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -219,6 +222,19 @@ impl Store {
     pub fn remove(&mut self, id: Uuid) {
         self.ws.profiles.retain(|p| p.id != id);
         self.ws.history.retain(|h| h.profile != id);
+        self.ws.favorites.retain(|f| *f != id);
+    }
+
+    pub fn is_favorite(&self, id: Uuid) -> bool {
+        self.ws.favorites.contains(&id)
+    }
+
+    pub fn toggle_favorite(&mut self, id: Uuid) {
+        if self.is_favorite(id) {
+            self.ws.favorites.retain(|f| *f != id);
+        } else {
+            self.ws.favorites.push(id);
+        }
     }
 
     /// Every folder path, including parents of nested folders.

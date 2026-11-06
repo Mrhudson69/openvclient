@@ -136,6 +136,7 @@ pub struct AppCtx {
     pub last_save: Instant,
     pub show_settings: bool,
     pub show_about: bool,
+    pub show_shortcuts: bool,
     /// Statements confirmed for production, keyed by tab id.
     pub pending_sql: Option<(u64, Vec<String>)>,
     /// Confirmed destructive resource actions, picked up by the connection's tab.
@@ -436,6 +437,7 @@ impl OpenvApp {
             last_save: Instant::now(),
             show_settings: false,
             show_about: false,
+            show_shortcuts: false,
             pending_sql: None,
             resource_jobs: HashMap::new(),
             store,
@@ -663,15 +665,19 @@ impl OpenvApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
-        let (palette, new_conn, new_sql, close, home) = ctx.input_mut(|i| {
+        let (palette, new_conn, new_sql, close, home, keys) = ctx.input_mut(|i| {
             (
                 i.consume_shortcut(&cmd(Key::K)) || i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::P)),
                 i.consume_shortcut(&cmd(Key::N)),
                 i.consume_shortcut(&cmd(Key::T)),
                 i.consume_shortcut(&cmd(Key::W)),
                 i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::H)),
+                i.consume_shortcut(&cmd(Key::Slash)),
             )
         });
+        if keys {
+            self.cx.show_shortcuts = !self.cx.show_shortcuts;
+        }
         if palette {
             self.cx.palette.open();
         }
@@ -1016,6 +1022,10 @@ impl OpenvApp {
                 link(ui, ICON_CODE, "Source on GitHub", &repo);
                 link(ui, ICON_NEW_RELEASES, "Release notes", &format!("{repo}/releases"));
                 link(ui, ICON_BUG_REPORT, "Report a bug", &format!("{repo}/issues/new/choose"));
+                if ui.button(ico(ICON_KEYBOARD, "Keyboard shortcuts")).clicked() {
+                    self.cx.show_shortcuts = true;
+                    close = true;
+                }
             });
             ui.add_space(theme::space::SM);
             ui.separator();
@@ -1037,12 +1047,39 @@ impl OpenvApp {
         }
     }
 
+    fn shortcuts_window(&mut self, ctx: &egui::Context) {
+        if !self.cx.show_shortcuts {
+            return;
+        }
+        let mut close = false;
+        egui::Modal::new(egui::Id::unique("shortcuts")).show(ctx, |ui| {
+            ui.set_width(480.0_f32.min(ctx.content_rect().width() - 48.0));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(ico(ICON_KEYBOARD, "Keyboard shortcuts")).size(17.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(String::from(ICON_CLOSE)).on_hover_text("Close (Esc)").clicked() {
+                        close = true;
+                    }
+                });
+            });
+            ui.add_space(theme::space::SM);
+            views::shortcuts_grid(ui);
+            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                close = true;
+            }
+        });
+        if close {
+            self.cx.show_shortcuts = false;
+        }
+    }
+
     fn settings_window(&mut self, ctx: &egui::Context) {
         if !self.cx.show_settings {
             return;
         }
         let mut close = false;
         let mut check_now = false;
+        let mut open_keys = false;
         let before = self.cx.store.ws.settings.clone();
         egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
             ui.set_width(640.0_f32.min(ctx.content_rect().width() - 48.0));
@@ -1117,6 +1154,13 @@ impl OpenvApp {
                     ui.checkbox(&mut s.confirm_production, "Type the name to confirm destructive actions");
                 });
                 ui.add_space(theme::space::SM);
+                ui.label(RichText::new("HELP").small().strong().color(t.muted_fg));
+                row(ui, "Keyboard shortcuts", &theme::kbd("All shortcuts; also ⌘/ anywhere"), &mut |ui| {
+                    if ui.button(ico(ICON_KEYBOARD, "Show shortcuts")).clicked() {
+                        open_keys = true;
+                    }
+                });
+                ui.add_space(theme::space::SM);
                 ui.separator();
                 // Paths wrap inside the dialog instead of widening it.
                 ui.add(egui::Label::new(RichText::new(format!("Workspace file: {}", crate::store::config_dir().join("workspace.json").display())).small().color(t.muted_fg)).wrap());
@@ -1137,6 +1181,10 @@ impl OpenvApp {
         });
         if check_now {
             self.cx.check_updates(true);
+        }
+        if open_keys {
+            self.cx.show_shortcuts = true;
+            self.cx.show_settings = false;
         }
         if close {
             self.cx.show_settings = false;
@@ -1322,6 +1370,7 @@ impl eframe::App for OpenvApp {
         self.confirm_dialog(&ctx);
         self.settings_window(&ctx);
         self.about_window(&ctx);
+        self.shortcuts_window(&ctx);
         let tabs: Vec<(u64, String)> = self.tree.tiles.tiles().filter_map(|t| if let Tile::Pane(p) = t { Some((p.id, p.title(&self.cx))) } else { None }).collect();
         views::palette::show(&ctx, &mut self.cx, &tabs);
         self.cx.toasts.show(&ctx);
@@ -1695,7 +1744,10 @@ mod walkthrough {
         {
             let app = h.state_mut();
             app.cx.store.ws.profiles.push(shop);
+            let pinned = others[0].id;
             app.cx.store.ws.profiles.extend(others);
+            app.cx.store.toggle_favorite(shop_id);
+            app.cx.store.toggle_favorite(pinned);
             app.cx.store.ws.settings.theme = ThemeChoice::Cartoon;
         }
         h.ctx.set_theme(egui::Theme::Light);
@@ -1725,6 +1777,9 @@ mod walkthrough {
         h.state_mut().cx.conn_dialog = None;
         h.state_mut().cx.show_settings = true;
         shot(&mut h, &out, "c6-settings-day");
+        h.state_mut().cx.show_settings = false;
+        h.state_mut().cx.show_shortcuts = true;
+        shot(&mut h, &out, "c7-shortcuts-day");
         drop(h);
         rt.shutdown_timeout(Duration::from_secs(1));
     }

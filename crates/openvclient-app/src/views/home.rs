@@ -20,10 +20,24 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
         });
         ui.add_space(theme::space::XL);
 
-        // Connection overview cards.
+        // Connection overview cards; favourites are pinned in their own section first.
         let mut profiles = cx.store.ws.profiles.clone();
         profiles.sort_by(|a, b| b.last_connected_at.cmp(&a.last_connected_at).then(a.name.cmp(&b.name)));
-        section(ui, "CONNECTIONS", &format!("{} saved · {} connected", profiles.len(), cx.conns.connected_ids().len()));
+        let (card_w, card_h, gap) = (290.0_f32, 112.0_f32, theme::space::MD);
+        let favs: Vec<_> = cx.store.ws.favorites.iter().filter_map(|id| profiles.iter().find(|p| p.id == *id).cloned()).collect();
+        if !favs.is_empty() {
+            section(ui, "FAVOURITES", &format!("{} pinned", favs.len()));
+            card_grid(ui, cx, &favs, card_w, card_h, gap);
+            ui.add_space(theme::space::LG);
+        }
+        let all = profiles.len();
+        profiles.retain(|p| !cx.store.is_favorite(p.id));
+        let title = if favs.is_empty() { "CONNECTIONS" } else { "OTHER CONNECTIONS" };
+        section(ui, title, &format!("{all} saved · {} connected", cx.conns.connected_ids().len()));
+        if favs.is_empty() && !profiles.is_empty() {
+            ui.label(RichText::new(format!("{}  Star a connection to pin it here.", String::from(ICON_STAR))).small().color(t.muted_fg));
+            ui.add_space(theme::space::XS);
+        }
         if profiles.is_empty() {
             card(ui, |ui| {
                 ui.label(RichText::new("No connections yet").strong());
@@ -34,21 +48,7 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
                 }
             });
         }
-        // Fixed-size cards in an even grid that reflows with the window width.
-        let (card_w, card_h, gap) = (290.0_f32, 112.0_f32, theme::space::MD);
-        let cols = (((ui.available_width() + gap) / (card_w + gap)).floor() as usize).max(1);
-        for row in profiles.iter().take(48).collect::<Vec<_>>().chunks(cols) {
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                for (i, p) in row.iter().enumerate() {
-                    if i > 0 {
-                        ui.add_space(gap);
-                    }
-                    connection_card(ui, cx, p, card_w, card_h);
-                }
-            });
-            ui.add_space(gap);
-        }
+        card_grid(ui, cx, &profiles, card_w, card_h, gap);
 
         ui.add_space(theme::space::XL);
         section(ui, "CONNECTORS IN THIS BUILD", "");
@@ -69,33 +69,31 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
             }
         });
 
-        ui.add_space(theme::space::XL);
-        section(ui, "KEYBOARD", "");
-        card(ui, |ui| {
-            egui::Grid::new("keys").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
-                for (k, what) in [
-                    ("⌘K", "Search everything"),
-                    ("⌘N", "New connection"),
-                    ("⌘T", "New SQL editor for the focused connection"),
-                    ("⌘⏎", "Run statement at cursor (or selection)"),
-                    ("⌘⇧⏎", "Run whole script"),
-                    ("⌘E", "Explain statement"),
-                    ("⌘.", "Cancel running query"),
-                    ("⌘S", "Save SQL to file"),
-                    ("⌃Space", "Autocomplete"),
-                    ("⌘W", "Close tab"),
-                    ("F5", "Refresh the current view"),
-                    ("⌘⇧H", "Home"),
-                ] {
-                    ui.label(RichText::new(theme::kbd(k)).monospace().strong());
-                    ui.label(RichText::new(what).color(t.muted_fg));
-                    ui.end_row();
-                }
-            });
-        });
         ui.add_space(theme::space::SM);
-        ui.label(RichText::new("Drag a tab to the edge of another to split the workspace.").small().color(t.muted_fg));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(theme::kbd("Keyboard shortcuts: ⌘/ (also in Settings)")).small().color(t.muted_fg));
+            if ui.small_button("Show").clicked() {
+                cx.show_shortcuts = true;
+            }
+        });
     });
+}
+
+/// Fixed-size cards in an even grid that reflows with the window width.
+fn card_grid(ui: &mut egui::Ui, cx: &mut AppCtx, profiles: &[openvclient_core::ConnectionProfile], card_w: f32, card_h: f32, gap: f32) {
+    let cols = (((ui.available_width() + gap) / (card_w + gap)).floor() as usize).max(1);
+    for row in profiles.iter().take(48).collect::<Vec<_>>().chunks(cols) {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for (i, p) in row.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(gap);
+                }
+                connection_card(ui, cx, p, card_w, card_h);
+            }
+        });
+        ui.add_space(gap);
+    }
 }
 
 fn connection_card(ui: &mut egui::Ui, cx: &mut AppCtx, p: &openvclient_core::ConnectionProfile, w: f32, h: f32) {
@@ -127,12 +125,13 @@ fn connection_card(ui: &mut egui::Ui, cx: &mut AppCtx, p: &openvclient_core::Con
         ui.horizontal(|ui| {
             crate::views::driver_glyph(ui, &p.driver, theme::icon::LG, env);
             // Name left-aligned and truncated; the badge keeps a fixed slot on the right.
-            let name_w = (ui.available_width() - 56.0).max(40.0);
+            let name_w = (ui.available_width() - 84.0).max(40.0);
             ui.allocate_ui_with_layout(egui::vec2(name_w, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(RichText::new(&p.name).strong().size(14.5)).truncate());
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 theme::badge(ui, p.environment.short(), env);
+                star_button(ui, cx, p.id);
             });
         });
         ui.add(egui::Label::new(RichText::new(p.summary()).small().color(t.muted_fg)).truncate());
@@ -169,4 +168,16 @@ fn card(ui: &mut egui::Ui, body: impl FnOnce(&mut egui::Ui)) {
         ui.set_max_width(720.0);
         body(ui);
     });
+}
+
+/// Star toggle: pins the connection to the Favourites section of Home.
+pub fn star_button(ui: &mut egui::Ui, cx: &mut AppCtx, id: uuid::Uuid) {
+    let fav = cx.store.is_favorite(id);
+    let t = theme::tokens(ui);
+    let (glyph, color, tip) = if fav { (ICON_STAR, t.warning, "Remove from favourites") } else { (ICON_STAR, t.muted_fg.gamma_multiply(0.4), "Add to favourites") };
+    let r = ui.add(egui::Label::new(RichText::new(String::from(glyph)).size(theme::icon::LG).color(color)).sense(egui::Sense::click()).selectable(false));
+    if r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
+        cx.store.toggle_favorite(id);
+        cx.mark_dirty();
+    }
 }

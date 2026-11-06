@@ -105,6 +105,43 @@ pub fn open_connection(cx: &mut crate::app::AppCtx, p: &openvclient_core::Connec
     cx.cmd(cmd);
 }
 
+/// Every global and editor shortcut, as shown in the Keyboard shortcuts window.
+pub const SHORTCUTS: &[(&str, &str, &str)] = &[
+    ("General", "⌘K", "Search everything"),
+    ("General", "⌘N", "New connection"),
+    ("General", "⌘⇧H", "Home"),
+    ("General", "⌘W", "Close tab"),
+    ("General", "F5", "Refresh the current view"),
+    ("General", "⌘/", "Keyboard shortcuts"),
+    ("SQL editor", "⌘T", "New SQL editor for the focused connection"),
+    ("SQL editor", "⌘⏎", "Run statement at cursor (or selection)"),
+    ("SQL editor", "⌘⇧⏎", "Run whole script"),
+    ("SQL editor", "⌘E", "Explain statement"),
+    ("SQL editor", "⌘.", "Cancel running query"),
+    ("SQL editor", "⌘S", "Save SQL to file"),
+    ("SQL editor", "⌃Space", "Autocomplete"),
+];
+
+/// Shortcut list grouped by area.
+pub fn shortcuts_grid(ui: &mut egui::Ui) {
+    let t = theme::tokens(ui);
+    let mut group = "";
+    egui::Grid::new("keys").num_columns(2).spacing([24.0, 6.0]).striped(false).show(ui, |ui| {
+        for (g, k, what) in SHORTCUTS {
+            if *g != group {
+                group = g;
+                ui.label(RichText::new(g.to_uppercase()).small().strong().color(t.muted_fg));
+                ui.end_row();
+            }
+            ui.label(RichText::new(theme::kbd(k)).monospace().strong());
+            ui.label(RichText::new(*what).color(t.fg));
+            ui.end_row();
+        }
+    });
+    ui.add_space(theme::space::SM);
+    ui.label(RichText::new("Drag a tab to the edge of another to split the workspace.").small().color(t.muted_fg));
+}
+
 /// Human name of a connector, e.g. "PostgreSQL".
 pub fn driver_label(cx: &crate::app::AppCtx, driver: &str) -> String {
     cx.conns.registry.get(driver).map(|d| d.info().name.to_string()).unwrap_or_else(|| driver.to_string())
