@@ -174,22 +174,24 @@ jobs:
       # Services that need a custom command, or that the Docker test drives.
       - name: Start extra test containers
         run: |
-          docker run -d --name ovc-minio -p 59000:9000 \
-            -e MINIO_ROOT_USER=ovcadmin -e MINIO_ROOT_PASSWORD=ovcpass123 \
-            minio/minio server /data
+          # S3 API server for the S3 connector test. The minio/minio image was
+          # removed from Docker Hub, so this uses SeaweedFS (same credentials).
+          printf '%s' '{"identities":[{"name":"ovc","credentials":[{"accessKey":"ovcadmin","secretKey":"ovcpass123"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > "$RUNNER_TEMP/s3.json"
+          docker run -d --name ovc-s3 -p 59000:8333 -v "$RUNNER_TEMP/s3.json:/etc/s3.json:ro" \
+            chrislusf/seaweedfs:4.50 server -s3 -s3.config=/etc/s3.json
           # live_docker exercises the container named openvclient-test-redis.
           docker run -d --name openvclient-test-redis redis:7-alpine
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --workspace --all-targets
-      - name: Wait for MinIO
+      - name: Wait for the S3 server
         run: |
           for i in $(seq 1 30); do
-            curl -fs http://127.0.0.1:59000/minio/health/live && exit 0
+            curl -s -o /dev/null http://127.0.0.1:59000/ && exit 0
             sleep 2
           done
-          echo "MinIO did not become ready; S3 test will skip"
+          echo "S3 server did not become ready; S3 test will skip"
       # Network-path tests (SSH/SOCKS5/HTTP proxy on 52222/51080/53128) skip
       # here until their proxy containers are added (see docs/RELEASE_PLAN.md).
       - name: Test (live connectors)
