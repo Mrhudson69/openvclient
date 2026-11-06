@@ -9,7 +9,7 @@
 # Output (each when its tool is available):
 #   dist/openvclient-<version>-linux-<arch>.tar.gz   always (with install.sh)
 #   dist/openvclient_<version>_<debarch>.deb         dpkg-deb   (Debian, Ubuntu, Mint)
-#   dist/openvclient-<version>-1.<arch>.rpm          rpmbuild   (Fedora, RHEL, openSUSE)
+#   dist/openvclient-<version>-1.<arch>.rpm          rpmbuild   (Fedora, RHEL, openSUSE; package version uses ~ for pre-releases)
 #   dist/OpenVClient-<version>-<arch>.AppImage       appimagetool (any distro, no install)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -226,8 +226,14 @@ gtk-update-icon-cache -q -t /usr/share/icons/hicolor 2>/dev/null || :
 update-desktop-database -q /usr/share/applications 2>/dev/null || :
 SPEC
   rpmbuild --quiet --define "_topdir $RPMTOP" --target "$ARCH" -bb "$RPMTOP/SPECS/openvclient.spec"
-  find "$RPMTOP/RPMS" -name '*.rpm' -exec cp {} dist/ \;
-  echo "Built $(ls dist/*.rpm | tail -1)"
+  # The package version keeps "~" (1.0.0~beta.1 sorts before 1.0.0), but the
+  # file name uses the release version: GitHub rewrites "~" in asset names to
+  # ".", which would break SHA256SUMS and look like a different version.
+  for f in "$RPMTOP"/RPMS/*/*.rpm; do
+    out="dist/$(basename "$f" | sed "s/${PKGVER}/${VERSION}/")"
+    cp "$f" "$out"
+    echo "Built $out ($(du -h "$out" | cut -f1))"
+  done
 else
   echo "rpmbuild not found; skipped .rpm (Fedora: sudo dnf install rpm-build)"
 fi
