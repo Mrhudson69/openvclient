@@ -1816,6 +1816,31 @@ mod walkthrough {
         std::env::var("OPENVCLIENT_DEMO_DB").unwrap_or_else(|_| "openv_demo".into())
     }
 
+    /// A valid one-page PDF with a title, built with correct xref offsets.
+    fn tiny_pdf(title: &str) -> Vec<u8> {
+        let stream = format!("BT /F1 28 Tf 60 720 Td ({title}) Tj ET\n0.13 0.77 0.37 rg 60 420 80 200 re f 160 420 80 120 re f 260 420 80 260 re f 360 420 80 160 re f\n");
+        let objs = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+            format!("<< /Length {} >>\nstream\n{stream}endstream", stream.len()),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        ];
+        let mut out = b"%PDF-1.4\n".to_vec();
+        let mut offs = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offs.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+        for o in offs {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+        out
+    }
+
     fn id_of(app: &OpenvApp, name: &str) -> Uuid {
         app.cx.store.ws.profiles.iter().find(|p| p.name.starts_with(name)).map(|p| p.id).expect("profile")
     }
@@ -1897,6 +1922,19 @@ mod walkthrough {
         std::thread::sleep(Duration::from_millis(300));
         settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
         shot(&mut h, &out, "05-table");
+        {
+            let app = h.state_mut();
+            if let Some(Tile::Pane(Tab { kind: TabKind::Table(t), .. })) = app.focused.and_then(|f| app.tree.tiles.get_mut(f)) {
+                t.grid.frozen = 2;
+            }
+        }
+        shot(&mut h, &out, "05b-frozen-columns");
+        {
+            let app = h.state_mut();
+            if let Some(Tile::Pane(Tab { kind: TabKind::Table(t), .. })) = app.focused.and_then(|f| app.tree.tiles.get_mut(f)) {
+                t.grid.frozen = 0;
+            }
+        }
 
         // Monitoring.
         h.state_mut().cx.cmd(Cmd::OpenMonitor(pg));
@@ -2020,6 +2058,12 @@ mod walkthrough {
             h.step();
         }
         shot(&mut h, &out, "14-home-light");
+        h.state_mut().cx.store.ws.settings.home_by_folder = true;
+        for _ in 0..4 {
+            h.step();
+        }
+        shot(&mut h, &out, "14b-home-by-folder");
+        h.state_mut().cx.store.ws.settings.home_by_folder = false;
         drop(h);
         rt.shutdown_timeout(Duration::from_secs(1));
     }
@@ -2064,7 +2108,8 @@ mod walkthrough {
         // Seed: a container with folders and a few typical files.
         let dir = std::env::temp_dir().join("ovc-files-shots");
         std::fs::create_dir_all(&dir).unwrap();
-        let files = [("alert_dump_01.00.parquet", 1_089_246), ("asset_dump_01.00.parquet", 742_311), ("summary.json", 2_048), ("readme.txt", 512), ("export.csv", 96_000), ("chart.png", 0)];
+        let files =
+            [("alert_dump_01.00.parquet", 1_089_246), ("asset_dump_01.00.parquet", 742_311), ("summary.json", 2_048), ("readme.txt", 512), ("export.csv", 96_000), ("chart.png", 0), ("report.pdf", 0)];
         rt.block_on(async {
             let mut a = Args::new();
             a.insert("name".into(), "analytics-exports".into());
@@ -2080,6 +2125,8 @@ mod walkthrough {
                     r#"{"alerts": 128, "assets": 3402, "generated": "2026-02-24T12:43:17Z"}"#.as_bytes().to_vec()
                 } else if name.ends_with(".txt") {
                     b"Daily export from the analytics pipeline.\n".to_vec()
+                } else if name.ends_with(".pdf") {
+                    tiny_pdf("Monthly analytics report")
                 } else if name.ends_with(".png") {
                     // A small generated chart, so the image preview has something to show.
                     let img = image::RgbaImage::from_fn(320, 180, |x, y| {
@@ -2142,6 +2189,23 @@ mod walkthrough {
         }
         settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
         shot(&mut h, &out, "f3b-image-preview");
+        {
+            let app = h.state_mut();
+            if let Some(tid) = app.find(|t| matches!(t.kind, TabKind::Files(_)))
+                && let Some(Tile::Pane(Tab { kind: TabKind::Files(f), .. })) = app.tree.tiles.get_mut(tid)
+            {
+                f.click_name(&app.cx, "report.pdf");
+            }
+        }
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(15));
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(15));
+        shot(&mut h, &out, "f3c-pdf-preview");
         h.state_mut().cx.store.ws.settings.theme = crate::store::ThemeChoice::Light;
         apply_theme(&h.ctx, crate::store::ThemeChoice::Light);
         shot(&mut h, &out, "f4-files-light");

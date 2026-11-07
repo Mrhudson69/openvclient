@@ -433,6 +433,10 @@ impl ResourceSession for S3Session {
                     let body = self.send(self.client.get(GetObject::new(&b, Some(&self.creds), key).sign(SIGN))).await?.bytes().await.map_err(|e| Error::other(e.to_string()))?;
                     return Ok(Content::Image(body.to_vec()));
                 }
+                if size > 0 && size <= openvclient_core::resource::IMAGE_PREVIEW_MAX && (ctype.contains("pdf") || openvclient_core::resource::is_pdf_name(key)) {
+                    let body = self.send(self.client.get(GetObject::new(&b, Some(&self.creds), key).sign(SIGN))).await?.bytes().await.map_err(|e| Error::other(e.to_string()))?;
+                    return Ok(Content::Pdf(body.to_vec()));
+                }
                 if size > 0 && size <= PREVIEW_MAX && textual {
                     let body = self.send(self.client.get(GetObject::new(&b, Some(&self.creds), key).sign(SIGN))).await?.bytes().await.map_err(|e| Error::other(e.to_string()))?;
                     let text = String::from_utf8_lossy(&body).into_owned();

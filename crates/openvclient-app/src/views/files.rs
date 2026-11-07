@@ -31,6 +31,24 @@ enum SortBy {
 struct Batch {
     label: String,
     job: Job<Vec<(String, Result<ActionOutcome>)>>,
+    /// Per-item status, updated by the running batch.
+    items: Arc<std::sync::Mutex<Vec<BatchItem>>>,
+}
+
+#[derive(Clone)]
+struct BatchItem {
+    name: String,
+    /// Local file size for uploads (weights the progress bar); 0 when unknown.
+    bytes: u64,
+    state: ItemState,
+}
+
+#[derive(Clone, PartialEq)]
+enum ItemState {
+    Waiting,
+    Running,
+    Done,
+    Failed(String),
 }
 
 enum Modal {
@@ -59,8 +77,14 @@ pub struct FilesTab {
     blank_menu: Option<egui::Pos2>,
     /// Decoded preview image, keyed by entry id (or the decode error).
     preview_tex: Option<(String, std::result::Result<egui::TextureHandle, String>)>,
+    /// First PDF page being rendered for the preview: (entry id, job).
+    pdf_job: Option<(String, Job<std::result::Result<Vec<u8>, String>>)>,
+    pdf_png: Option<(String, std::result::Result<Vec<u8>, String>)>,
     preview_job: Option<Job<Result<Content>>>,
     batch: Option<Batch>,
+    /// Items inside each listed folder, counted in the background: (count, more).
+    counts: std::collections::HashMap<String, (usize, bool)>,
+    count_job: Option<Job<Vec<(String, Result<(usize, bool)>)>>>,
     modal: Option<Modal>,
     delete_confirmed: Arc<AtomicBool>,
     pending_delete: Vec<FileEntry>,
@@ -125,8 +149,12 @@ impl FilesTab {
             preview_w: 340.0,
             blank_menu: None,
             preview_tex: None,
+            pdf_job: None,
+            pdf_png: None,
             preview_job: None,
             batch: None,
+            counts: Default::default(),
+            count_job: None,
             modal: None,
             delete_confirmed: Arc::new(AtomicBool::new(false)),
             pending_delete: Vec::new(),
@@ -228,15 +256,36 @@ impl FilesTab {
     fn run_batch(&mut self, cx: &AppCtx, label: String, items: Vec<(String, &'static str, Args)>) {
         let Some(s) = Self::session(cx, self.conn) else { return };
         let total = items.len();
+        let status: Vec<BatchItem> = items
+            .iter()
+            .map(|(node, _, args)| {
+                let full = args.get("name").or(args.get("file")).cloned().unwrap_or_else(|| node.clone());
+                let name = full.rsplit(['/', '\\']).find(|p| !p.is_empty()).unwrap_or(&full).to_string();
+                let bytes = args.get("file").and_then(|f| std::fs::metadata(f).ok()).map(|m| m.len()).unwrap_or(0);
+                BatchItem { name, bytes, state: ItemState::Waiting }
+            })
+            .collect();
+        let shared = Arc::new(std::sync::Mutex::new(status));
+        let progress = shared.clone();
         let job = cx.bg.spawn(label.clone(), async move {
             let mut out = Vec::with_capacity(total);
-            for (node, action, args) in items {
+            for (i, (node, action, args)) in items.into_iter().enumerate() {
                 let name = args.get("name").or(args.get("file")).cloned().unwrap_or_else(|| node.clone());
-                out.push((name, s.run_action(&node, action, args).await));
+                if let Ok(mut p) = progress.lock() {
+                    p[i].state = ItemState::Running;
+                }
+                let r = s.run_action(&node, action, args).await;
+                if let Ok(mut p) = progress.lock() {
+                    p[i].state = match &r {
+                        Ok(_) => ItemState::Done,
+                        Err(e) => ItemState::Failed(e.message.clone()),
+                    };
+                }
+                out.push((name, r));
             }
             out
         });
-        self.batch = Some(Batch { label, job });
+        self.batch = Some(Batch { label, job, items: shared });
     }
 
     fn upload_paths(&mut self, cx: &mut AppCtx, paths: Vec<PathBuf>) {
@@ -352,7 +401,29 @@ impl FilesTab {
             self.load(cx);
         }
         if let Some(r) = poll(&mut self.job) {
+            // Count what is inside each folder, one quick listing at a time.
+            if let Ok(l) = &r {
+                let dirs: Vec<String> = l.entries.iter().filter(|e| e.is_dir).take(60).map(|e| e.id.clone()).collect();
+                if !dirs.is_empty() {
+                    let s2 = s.clone();
+                    self.count_job = Some(cx.bg.spawn("Counting folder items", async move {
+                        let mut out = Vec::with_capacity(dirs.len());
+                        for d in dirs {
+                            let r = s2.list_dir(Some(&d), "").await.map(|l| (l.entries.len(), l.truncated));
+                            out.push((d, r));
+                        }
+                        out
+                    }));
+                }
+            }
             self.listing = Some(r);
+        }
+        if let Some(rs) = poll(&mut self.count_job) {
+            for (id, r) in rs {
+                if let Ok(c) = r {
+                    self.counts.insert(id, c);
+                }
+            }
         }
         if let Some(r) = poll(&mut self.preview_job)
             && let Some((_, c)) = &mut self.preview
@@ -542,10 +613,52 @@ impl FilesTab {
             });
         });
         if let Some(b) = &self.batch {
+            let items = b.items.lock().map(|v| v.clone()).unwrap_or_default();
+            let done = items.iter().filter(|i| matches!(i.state, ItemState::Done | ItemState::Failed(_))).count();
+            let failed = items.iter().filter(|i| matches!(i.state, ItemState::Failed(_))).count();
+            // Weight by size when sizes are known (uploads), else by item count.
+            let total_b: u64 = items.iter().map(|i| i.bytes).sum();
+            let frac = if total_b > 0 {
+                items.iter().filter(|i| matches!(i.state, ItemState::Done | ItemState::Failed(_))).map(|i| i.bytes).sum::<u64>() as f32 / total_b as f32
+            } else {
+                done as f32 / items.len().max(1) as f32
+            };
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(RichText::new(format!("{}…", b.label)).color(t.info));
+                ui.label(RichText::new(format!("{} · {done} of {}", b.label, items.len())).color(t.info));
+                if total_b > 0 {
+                    ui.label(RichText::new(human(total_b)).color(t.muted_fg));
+                }
+                if failed > 0 {
+                    ui.label(RichText::new(format!("{failed} failed")).color(t.destructive));
+                }
             });
+            ui.add(egui::ProgressBar::new(frac).desired_height(6.0).fill(t.accent));
+            if items.len() > 1 {
+                egui::CollapsingHeader::new(RichText::new("Files").small().color(t.muted_fg)).id_salt(("batch_items", self.conn)).default_open(items.len() <= 8).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                        for it in &items {
+                            ui.horizontal(|ui| {
+                                let (icon, color) = match &it.state {
+                                    ItemState::Waiting => (ICON_SCHEDULE, t.muted_fg),
+                                    ItemState::Running => (ICON_SYNC, t.info),
+                                    ItemState::Done => (ICON_CHECK_CIRCLE, t.accent),
+                                    ItemState::Failed(_) => (ICON_ERROR, t.destructive),
+                                };
+                                ui.label(RichText::new(String::from(icon)).color(color));
+                                let r = ui.add(egui::Label::new(RichText::new(&it.name).small()).truncate());
+                                if let ItemState::Failed(m) = &it.state {
+                                    r.on_hover_text(m);
+                                }
+                                if it.bytes > 0 {
+                                    ui.label(RichText::new(human(it.bytes)).small().color(t.muted_fg));
+                                }
+                            });
+                        }
+                    });
+                });
+            }
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
         }
         ui.add_space(theme::space::XS);
 
@@ -711,7 +824,13 @@ impl FilesTab {
                             // Folders have no size; leave the cell empty rather than a dash.
                             let size = match e.size {
                                 Some(n) => human(n),
-                                None if e.is_dir => String::new(),
+                                None if e.is_dir => match self.counts.get(&e.id) {
+                                    Some((0, _)) => "empty".into(),
+                                    Some((n, true)) => format!("{n}+ items"),
+                                    Some((1, false)) => "1 item".into(),
+                                    Some((n, false)) => format!("{n} items"),
+                                    None => String::new(),
+                                },
                                 None => "—".into(),
                             };
                             ui.label(RichText::new(size).color(t.muted_fg));
@@ -922,6 +1041,59 @@ impl FilesTab {
                         }
                         Content::Empty(m) => {
                             ui.label(RichText::new(m).color(t.muted_fg));
+                        }
+                        Content::Pdf(bytes) => {
+                            let pages = crate::pdf::page_count(bytes);
+                            ui.label(RichText::new(format!("PDF · {} page{} · {}", pages, if pages == 1 { "" } else { "s" }, human(bytes.len() as u64))).small().color(t.muted_fg));
+                            if ui.button(ico(ICON_OPEN_IN_NEW, "Open in viewer")).clicked()
+                                && let Err(err) = crate::pdf::open_in_viewer(&e.name, bytes)
+                            {
+                                cx.toasts.error_text("Could not open the PDF", err);
+                            }
+                            ui.add_space(theme::space::SM);
+                            // Render page 1 once per file, in the background.
+                            if self.pdf_png.as_ref().is_none_or(|(id, _)| *id != e.id) && self.pdf_job.as_ref().is_none_or(|(id, _)| *id != e.id) {
+                                let b = bytes.clone();
+                                self.pdf_job = Some((e.id.clone(), cx.bg.spawn("Rendering PDF page", crate::pdf::first_page_png(b))));
+                            }
+                            if let Some((id, job)) = &mut self.pdf_job
+                                && let Some(r) = job.take()
+                            {
+                                self.pdf_png = Some((id.clone(), r));
+                                self.pdf_job = None;
+                            }
+                            match &self.pdf_png {
+                                Some((id, Ok(png))) if *id == e.id => {
+                                    if self.preview_tex.as_ref().is_none_or(|(tid, _)| *tid != e.id) {
+                                        let tex = image::load_from_memory(png).map_err(|err| err.to_string()).map(|img| {
+                                            let img = if img.width() > 2048 || img.height() > 2048 { img.thumbnail(2048, 2048) } else { img };
+                                            let rgba = img.to_rgba8();
+                                            let ci = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw());
+                                            ui.ctx().load_texture(format!("preview:{}", e.id), ci, egui::TextureOptions::LINEAR)
+                                        });
+                                        self.preview_tex = Some((e.id.clone(), tex));
+                                    }
+                                    if let Some((_, Ok(tex))) = &self.preview_tex {
+                                        let size = tex.size_vec2();
+                                        let w = ui.available_width().min(size.x);
+                                        // Pages are paper: white behind transparent renders.
+                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(w, w * size.y / size.x.max(1.0)), Sense::hover());
+                                        ui.painter().rect_filled(rect, 2.0, egui::Color32::WHITE);
+                                        ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Outside);
+                                        egui::Image::new(tex).paint_at(ui, rect);
+                                        ui.label(RichText::new("Page 1").small().color(t.muted_fg));
+                                    }
+                                }
+                                Some((id, Err(m))) if *id == e.id => {
+                                    ui.label(RichText::new(m).color(t.muted_fg));
+                                }
+                                _ => {
+                                    ui.horizontal(|ui| {
+                                        ui.spinner();
+                                        ui.label(RichText::new("Rendering page 1…").color(t.muted_fg));
+                                    });
+                                }
+                            }
                         }
                         Content::Image(bytes) => {
                             if self.preview_tex.as_ref().is_none_or(|(id, _)| *id != e.id) {

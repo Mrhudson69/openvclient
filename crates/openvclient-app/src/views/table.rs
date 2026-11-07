@@ -45,7 +45,7 @@ pub struct TableTab {
     deleted: HashSet<usize>,
     inserted: usize,
     save_job: Option<Job<Result<u64>>>,
-    grid: GridState,
+    pub grid: GridState,
     generation: u64,
 }
 

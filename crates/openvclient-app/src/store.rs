@@ -64,6 +64,9 @@ pub struct Settings {
     /// Ask for the typed name on Staging connections too.
     #[serde(default)]
     pub confirm_staging: bool,
+    /// Home groups connection cards by sidebar folder instead of most recent first.
+    #[serde(default)]
+    pub home_by_folder: bool,
 }
 
 fn default_zoom() -> f32 {
@@ -107,6 +110,7 @@ impl Default for Settings {
             short_timestamps: true,
             query_timeout_secs: 0,
             confirm_staging: false,
+            home_by_folder: false,
         }
     }
 }

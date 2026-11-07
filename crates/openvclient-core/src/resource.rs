@@ -77,6 +77,12 @@ pub enum Content {
     Empty(String),
     /// Encoded image bytes (PNG, JPEG, GIF, WebP, BMP) for an inline preview.
     Image(Vec<u8>),
+    /// A PDF document; the app renders its first page when a renderer is available.
+    Pdf(Vec<u8>),
+}
+
+pub fn is_pdf_name(name: &str) -> bool {
+    name.to_ascii_lowercase().ends_with(".pdf")
 }
 
 /// Images up to this size are previewed inline.

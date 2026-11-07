@@ -58,7 +58,18 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
         let all = profiles.len();
         profiles.retain(|p| !cx.store.is_favorite(p.id));
         let title = if favs.is_empty() { "CONNECTIONS" } else { "OTHER CONNECTIONS" };
-        section(ui, title, &format!("{all} saved · {} connected · most recent first", cx.conns.connected_ids().len()));
+        ui.horizontal(|ui| {
+            section(ui, title, &format!("{all} saved · {} connected", cx.conns.connected_ids().len()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let s = &mut cx.store.ws.settings;
+                let before = s.home_by_folder;
+                ui.selectable_value(&mut s.home_by_folder, true, ico(ICON_FOLDER, "By folder"));
+                ui.selectable_value(&mut s.home_by_folder, false, ico(ICON_SCHEDULE, "Recent first"));
+                if before != s.home_by_folder {
+                    cx.dirty = true;
+                }
+            });
+        });
         if favs.is_empty() && !profiles.is_empty() {
             ui.label(RichText::new(format!("{}  Star a connection to pin it here.", String::from(ICON_STAR))).small().color(t.muted_fg));
             ui.add_space(theme::space::XS);
@@ -73,7 +84,22 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
                 }
             });
         }
-        card_grid(ui, cx, &profiles, card_w, card_h, gap);
+        if cx.store.ws.settings.home_by_folder {
+            // One group per sidebar folder, in folder order; loose connections last.
+            let mut folders: Vec<String> = profiles.iter().map(|p| p.folder.trim_matches('/').to_string()).collect();
+            folders.sort_by_key(|f| (f.is_empty(), f.to_lowercase()));
+            folders.dedup();
+            for f in folders {
+                let mut group: Vec<_> = profiles.iter().filter(|p| p.folder.trim_matches('/') == f).cloned().collect();
+                group.sort_by_key(|p| p.name.to_lowercase());
+                ui.add_space(theme::space::XS);
+                ui.label(RichText::new(ico(if f.is_empty() { ICON_LINK_OFF } else { ICON_FOLDER }, if f.is_empty() { "No folder" } else { &f })).strong().color(t.muted_fg));
+                ui.add_space(theme::space::XS);
+                card_grid(ui, cx, &group, card_w, card_h, gap);
+            }
+        } else {
+            card_grid(ui, cx, &profiles, card_w, card_h, gap);
+        }
 
         recent_queries(ui, cx);
 
