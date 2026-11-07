@@ -112,6 +112,7 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("General", "⌘⇧H", "Home"),
     ("General", "⌘W", "Close tab"),
     ("General", "⌘⇧T", "Reopen closed tab"),
+    ("General", "⌘B", "Hide or show the sidebar"),
     ("General", "⌘1 … ⌘9", "Switch to tab 1–8, or the last tab"),
     ("General", "F5", "Refresh the current view"),
     ("General", "⌘/", "Keyboard shortcuts"),
@@ -198,4 +199,15 @@ pub fn busy(ui: &mut egui::Ui, label: &str) {
         ui.add(egui::Spinner::new().size(14.0));
         ui.label(RichText::new(label).color(theme::muted(ui)));
     });
+}
+
+/// What an environment badge changes, for its tooltip.
+pub fn env_tip(e: openvclient_core::Environment) -> &'static str {
+    use openvclient_core::Environment::*;
+    match e {
+        Development => "Development: no extra safety prompts",
+        Testing => "Testing: no extra safety prompts",
+        Staging => "Staging: amber badge; type-to-confirm when enabled in Settings → Safety",
+        Production => "Production: red tab bar, and destructive actions need the name typed to confirm",
+    }
 }

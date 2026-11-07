@@ -181,7 +181,7 @@ fn connection_card(ui: &mut egui::Ui, cx: &mut AppCtx, p: &openvclient_core::Con
                 ui.add(egui::Label::new(RichText::new(&p.name).strong().size(14.5)).truncate());
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                theme::badge(ui, p.environment.short(), env);
+                theme::badge(ui, p.environment.short(), env).on_hover_text(crate::views::env_tip(p.environment));
                 star_button(ui, cx, p.id);
             });
         });

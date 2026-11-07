@@ -280,6 +280,7 @@ impl ResourceTab {
                                 overlay: Overlay::default(),
                                 generation: self.generation,
                                 row_offset: self.offset,
+                                server_filter: false,
                             }
                             .show(ui, &mut self.grid);
                             detail_window(ui.ctx(), egui::Id::unique(("resdetail", tab_id)), &rs, &mut self.grid);

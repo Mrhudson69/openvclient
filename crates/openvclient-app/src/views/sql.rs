@@ -42,6 +42,8 @@ pub struct SqlTab {
     dialect: Dialect,
     run: Option<Job<Vec<StatementResult>>>,
     running_sql: Vec<String>,
+    /// When the current run started (for the Settings query timeout).
+    run_started: Option<std::time::Instant>,
     results: Vec<StatementResult>,
     grids: Vec<GridState>,
     active: usize,
@@ -85,6 +87,7 @@ impl SqlTab {
             dialect,
             run: None,
             running_sql: Vec::new(),
+            run_started: None,
             results: Vec::new(),
             grids: Vec::new(),
             active: 0,
@@ -100,6 +103,17 @@ impl SqlTab {
             last_cursor: None,
             last_selection: None,
         }
+    }
+
+    /// 1-based line and column of the cursor, plus selected characters.
+    pub fn cursor_position(&self) -> Option<(usize, usize, usize)> {
+        let c = self.last_cursor.filter(|c| *c <= self.text.len() && self.text.is_char_boundary(*c))?;
+        let before = &self.text[..c];
+        let line = before.matches('\n').count() + 1;
+        let col = before.rsplit('\n').next().map(|l| l.chars().count()).unwrap_or(0) + 1;
+        let sel =
+            self.last_selection.filter(|(a, b)| *b <= self.text.len() && self.text.is_char_boundary(*a) && self.text.is_char_boundary(*b)).map(|(a, b)| self.text[a..b].chars().count()).unwrap_or(0);
+        Some((line, col, sel))
     }
 
     /// Database and text, for reopening a closed tab.
@@ -184,6 +198,7 @@ impl SqlTab {
         self.running_sql = stmts.clone();
         let n = stmts.len();
         self.run = Some(cx.bg.spawn(format!("Running {n} statement{}", if n == 1 { "" } else { "s" }), async move { c.execute(stmts, ExecOptions { max_rows: max }).await }));
+        self.run_started = Some(std::time::Instant::now());
         self.pane = Pane::Results;
     }
 
@@ -229,6 +244,20 @@ impl SqlTab {
             self.plan_view = Default::default();
         }
         let running = self.run.is_some();
+        // Settings → Query timeout: cancel runs that take too long.
+        let limit = cx.store.ws.settings.query_timeout_secs;
+        if running
+            && limit > 0
+            && self.run_started.is_some_and(|t| t.elapsed().as_secs() >= limit)
+            && let Some(c) = self.console()
+        {
+            c.cancel();
+            self.run_started = None;
+            cx.toasts.warn("Query cancelled", format!("It ran longer than the {limit} s timeout set in Settings."));
+        }
+        if running && limit > 0 {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+        }
         let caps = cx.conns.session(self.conn).and_then(|h| h.sql()).map(|s| s.capabilities()).unwrap_or_default();
 
         // Shortcuts apply only while this tab is focused.
@@ -312,7 +341,7 @@ impl SqlTab {
                     }
                 }
                 if let Some(p) = cx.store.profile(self.conn) {
-                    theme::badge(ui, p.environment.short(), theme::env_color(ui, p.environment));
+                    theme::badge(ui, p.environment.short(), theme::env_color(ui, p.environment)).on_hover_text(crate::views::env_tip(p.environment));
                 }
             });
         });
@@ -530,14 +559,20 @@ impl SqlTab {
                                 overlay: Overlay::default(),
                                 generation: self.generation,
                                 row_offset: 0,
+                                server_filter: false,
                             }
                             .show(ui, st),
                         );
                         detail_window(ui.ctx(), egui::Id::unique(("detail", tab_id)), &rs, st);
                         for e in events {
-                            if let GridEvent::CopyRows(rows, f) = e {
-                                ui.ctx().copy_text(crate::export::render(&rs, &rows, None, f, Some(self.dialect), ""));
-                                cx.toasts.ok(format!("Copied {} row(s) as {}", rows.len(), f.label()));
+                            match e {
+                                GridEvent::CopyRows(rows, f) => {
+                                    ui.ctx().copy_text(crate::export::render(&rs, &rows, None, f, Some(self.dialect), ""));
+                                    cx.toasts.ok(format!("Copied {} row(s) as {}", rows.len(), f.label()));
+                                }
+                                // Results are filtered in memory: put the value in the filter box.
+                                GridEvent::FilterBy { value, .. } => st.filter = value.to_text().unwrap_or_else(|| "NULL".into()),
+                                _ => {}
                             }
                         }
                     }
@@ -585,7 +620,8 @@ impl SqlTab {
                         plan_node(ui, tree, 0, max_cost, max_ms);
                     } else if let Some(rs) = &p.table {
                         let mut st = GridState::default();
-                        Grid { id: egui::Id::unique("plan_table"), rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: 0, row_offset: 0 }.show(ui, &mut st);
+                        Grid { id: egui::Id::unique("plan_table"), rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: 0, row_offset: 0, server_filter: false }
+                            .show(ui, &mut st);
                     } else {
                         ui.label(RichText::new(&p.raw).monospace());
                     }

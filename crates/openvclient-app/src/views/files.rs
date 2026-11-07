@@ -53,6 +53,10 @@ pub struct FilesTab {
     selected: BTreeSet<String>,
     anchor: Option<usize>,
     preview: Option<(FileEntry, Option<Result<Content>>)>,
+    /// Width of the preview pane; drag its left edge to change it.
+    preview_w: f32,
+    /// Right-click on empty space in the list opens this menu at the pointer.
+    blank_menu: Option<egui::Pos2>,
     preview_job: Option<Job<Result<Content>>>,
     batch: Option<Batch>,
     modal: Option<Modal>,
@@ -116,6 +120,8 @@ impl FilesTab {
             selected: BTreeSet::new(),
             anchor: None,
             preview: None,
+            preview_w: 340.0,
+            blank_menu: None,
             preview_job: None,
             batch: None,
             modal: None,
@@ -541,7 +547,7 @@ impl FilesTab {
         ui.add_space(theme::space::XS);
 
         // ---- body: list + preview -------------------------------------------------------
-        let preview_w = if self.preview.is_some() { 340.0_f32.min(ui.available_width() * 0.4) } else { 0.0 };
+        let preview_w = if self.preview.is_some() { self.preview_w.clamp(220.0, (ui.available_width() * 0.6).max(220.0)) } else { 0.0 };
         let area = ui.available_rect_before_wrap();
         let gap = if preview_w > 0.0 { 12.0 } else { 0.0 };
         let list_rect = egui::Rect::from_min_max(area.min, egui::pos2(area.max.x - preview_w - gap, area.max.y));
@@ -549,7 +555,15 @@ impl FilesTab {
         self.list_ui(&mut list_ui, cx, &s, hovering, read_only);
         if self.preview.is_some() {
             let prev_rect = egui::Rect::from_min_max(egui::pos2(area.max.x - preview_w, area.min.y), area.max);
-            ui.painter().vline(prev_rect.left() - gap / 2.0, area.y_range(), egui::Stroke::new(1.0, t.border));
+            // Draggable divider between the list and the preview.
+            let x = prev_rect.left() - gap / 2.0;
+            let handle = egui::Rect::from_min_max(egui::pos2(x - 4.0, area.top()), egui::pos2(x + 4.0, area.bottom()));
+            let hr = ui.interact(handle, egui::Id::unique(("preview_split", self.conn)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            if hr.dragged() {
+                self.preview_w = (preview_w - hr.drag_delta().x).max(220.0);
+            }
+            let col = if hr.hovered() || hr.dragged() { t.ring } else { t.border };
+            ui.painter().vline(x, area.y_range(), egui::Stroke::new(if hr.hovered() { 2.0 } else { 1.0 }, col));
             let mut pui = ui.new_child(egui::UiBuilder::new().max_rect(prev_rect).layout(egui::Layout::top_down(egui::Align::Min)));
             self.preview_ui(&mut pui, cx);
         }
@@ -758,6 +772,47 @@ impl FilesTab {
             });
         self.sort = sort;
         self.drop_overlay(ui, rect, hovering);
+
+        // Right-click on empty space: folder-level actions.
+        let pointer = ui.input(|i| i.pointer.interact_pos());
+        if context.is_none()
+            && ui.input(|i| i.pointer.secondary_clicked())
+            && let Some(pos) = pointer.filter(|p| rect.contains(*p))
+        {
+            self.blank_menu = Some(pos);
+        }
+        if let Some(pos) = self.blank_menu {
+            let fa = s.file_actions();
+            let can_write = !read_only && self.cwd.is_some();
+            let mut close = false;
+            let area = egui::Area::new(egui::Id::unique(("files_blank_menu", self.conn))).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
+                egui::Frame::menu(ui.style()).show(ui, |ui| {
+                    ui.set_min_width(180.0);
+                    if fa.mkdir.is_some() && ui.add_enabled(can_write, egui::Button::new(ico(ICON_CREATE_NEW_FOLDER, "New folder…"))).clicked() {
+                        self.modal = Some(Modal::NewFolder(String::new()));
+                        close = true;
+                    }
+                    if fa.upload.is_some() && ui.add_enabled(can_write, egui::Button::new(ico(ICON_UPLOAD, "Upload files…"))).clicked() {
+                        close = true;
+                        if let Some(paths) = rfd::FileDialog::new().set_title("Upload files").pick_files() {
+                            self.upload_paths(cx, paths);
+                        }
+                    }
+                    if ui.button(ico(ICON_REFRESH, "Refresh")).clicked() {
+                        self.listing = None;
+                        close = true;
+                    }
+                    if ui.button(ico(ICON_SELECT_ALL, "Select all")).clicked() {
+                        self.selected = entries.iter().map(|e| e.id.clone()).collect();
+                        close = true;
+                    }
+                });
+            });
+            let clicked_outside = ui.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer() && !ui.input(|i| i.pointer.secondary_clicked());
+            if close || clicked_outside || ui.input(|i| i.key_pressed(Key::Escape)) {
+                self.blank_menu = None;
+            }
+        }
 
         // ---- apply interactions -------------------------------------------------------
         if let Some((i, e)) = context

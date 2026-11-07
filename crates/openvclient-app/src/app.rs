@@ -148,6 +148,8 @@ pub struct AppCtx {
     pub show_settings: bool,
     pub show_about: bool,
     pub show_shortcuts: bool,
+    /// Sidebar folded away (⌘B) to give the content the whole width.
+    pub sidebar_hidden: bool,
     /// Statements confirmed for production, keyed by tab id.
     pub pending_sql: Option<(u64, Vec<String>)>,
     /// Confirmed destructive resource actions, picked up by the connection's tab.
@@ -174,8 +176,9 @@ impl AppCtx {
         self.store.profile(id).map(|p| p.name.clone()).unwrap_or_else(|| "(deleted connection)".into())
     }
 
+    /// Production, or Staging when Settings asks for confirmation there too.
     pub fn is_production(&self, id: Uuid) -> bool {
-        self.store.profile(id).is_some_and(|p| p.environment.is_protected())
+        self.store.profile(id).is_some_and(|p| p.environment.is_protected() || (p.environment == openvclient_core::Environment::Staging && self.store.ws.settings.confirm_staging))
     }
 
     /// Ask before a destructive action. `name` must be typed on production.
@@ -540,6 +543,8 @@ pub struct OpenvApp {
     /// Windows: whether the end-session hook has been attempted.
     #[cfg(windows)]
     session_hooked: bool,
+    /// Zoom factor last applied, to tell keyboard zoom from a Settings change.
+    applied_zoom: f32,
 }
 
 impl OpenvApp {
@@ -569,6 +574,7 @@ impl OpenvApp {
             show_settings: false,
             show_about: false,
             show_shortcuts: false,
+            sidebar_hidden: false,
             pending_sql: None,
             resource_jobs: HashMap::new(),
             tab_actions: Vec::new(),
@@ -592,6 +598,7 @@ impl OpenvApp {
             window_fitted: false,
             #[cfg(windows)]
             session_hooked: false,
+            applied_zoom: 1.0,
         }
     }
 
@@ -852,6 +859,9 @@ impl OpenvApp {
         if reopen {
             self.cx.tab_actions.push(TabAction::Reopen);
         }
+        if ctx.input_mut(|i| i.consume_shortcut(&cmd(Key::B))) {
+            self.cx.sidebar_hidden = !self.cx.sidebar_hidden;
+        }
         if let Some(n) = nth {
             // ⌘1…⌘8 pick that tab in the focused strip; ⌘9 picks the last one.
             let strip = self.focused.and_then(|f| self.tree.tiles.parent_of(f)).or_else(|| self.tree.tiles.iter().find_map(|(id, t)| matches!(t, Tile::Container(Container::Tabs(_))).then_some(*id)));
@@ -926,7 +936,12 @@ impl OpenvApp {
                 ui.add_space(theme::space::XS);
                 theme::brand_mark(ui, 26.0);
                 theme::wordmark(ui, 16.0);
-                ui.add_space(theme::space::LG);
+                ui.add_space(theme::space::SM);
+                let (g, tip) = if self.cx.sidebar_hidden { (ICON_LEFT_PANEL_OPEN, "Show sidebar (⌘B)") } else { (ICON_LEFT_PANEL_CLOSE, "Hide sidebar (⌘B)") };
+                if ui.button(String::from(g)).on_hover_text(theme::kbd(tip)).clicked() {
+                    self.cx.sidebar_hidden = !self.cx.sidebar_hidden;
+                }
+                ui.add_space(theme::space::SM);
                 let search = ui.add_sized(
                     [340.0, 26.0],
                     egui::Button::new(RichText::new(format!("{}   Search connections, tables, commands…   {}", String::from(ICON_SEARCH), theme::kbd("⌘K"))).color(theme::muted(ui))),
@@ -963,7 +978,7 @@ impl OpenvApp {
                 let focused = self.focused_conn();
                 if let Some(c) = focused {
                     if let Some(p) = self.cx.store.profile(c) {
-                        theme::badge(ui, p.environment.short(), theme::env_color(ui, p.environment));
+                        theme::badge(ui, p.environment.short(), theme::env_color(ui, p.environment)).on_hover_text(crate::views::env_tip(p.environment));
                         ui.label(RichText::new(&p.name).small());
                     }
                     match self.cx.conns.state(c) {
@@ -992,6 +1007,14 @@ impl OpenvApp {
                     let running = self.cx.bg.running();
                     let n = self.cx.conns.connected_ids().len();
                     ui.label(RichText::new(format!("{n} connected")).small().color(t.muted_fg));
+                    // Cursor position of the focused SQL editor.
+                    if let Some(Tile::Pane(Tab { kind: TabKind::Sql(st), .. })) = self.focused.and_then(|f| self.tree.tiles.get(f))
+                        && let Some((line, col, sel)) = st.cursor_position()
+                    {
+                        ui.separator();
+                        let txt = if sel > 0 { format!("Ln {line}, Col {col} ({sel} selected)") } else { format!("Ln {line}, Col {col}") };
+                        ui.label(RichText::new(txt).small().color(t.muted_fg));
+                    }
                     for task in running.iter().take(3) {
                         ui.separator();
                         if ui.small_button(String::from(ICON_CLOSE)).on_hover_text("Cancel").clicked() {
@@ -1266,6 +1289,7 @@ impl OpenvApp {
         let mut close = false;
         let mut check_now = false;
         let mut open_keys = false;
+        let (mut export_ws, mut import_ws) = (false, false);
         let before = self.cx.store.ws.settings.clone();
         egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
             ui.set_width(640.0_f32.min(ctx.content_rect().width() - 48.0));
@@ -1337,6 +1361,10 @@ impl OpenvApp {
                         check_now = true;
                     }
                 });
+                row(ui, "Interface size", &theme::kbd("Whole app; also ⌘= and ⌘−"), &mut |ui| {
+                    ui.spacing_mut().slider_width = 220.0;
+                    ui.add(egui::Slider::new(&mut s.ui_zoom, 0.7..=1.6).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
+                });
                 row(ui, "Scroll speed", "Multiplier for mouse wheel and trackpad scrolling", &mut |ui| {
                     ui.spacing_mut().slider_width = 220.0;
                     ui.add(egui::Slider::new(&mut s.scroll_speed, 0.2..=2.0).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
@@ -1349,10 +1377,22 @@ impl OpenvApp {
                 row(ui, "Table page size", "Rows per page in the table browser", &mut |ui| {
                     ui.add(egui::DragValue::new(&mut s.page_size).range(10..=10_000).speed(10));
                 });
+                row(ui, "NULL shown as", "How empty (NULL) cells read in grids", &mut |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut s.null_display).desired_width(120.0).char_limit(12));
+                });
+                row(ui, "Timestamps", "Copy and export always keep the full value", &mut |ui| {
+                    ui.checkbox(&mut s.short_timestamps, "Hide fractional seconds in grids");
+                });
                 ui.add_space(theme::space::SM);
                 ui.label(RichText::new("SAFETY").small().strong().color(t.muted_fg));
                 row(ui, "Production", "", &mut |ui| {
                     ui.checkbox(&mut s.confirm_production, "Type the name to confirm destructive actions");
+                });
+                row(ui, "Staging", "Off: Staging connections only show their badge", &mut |ui| {
+                    ui.checkbox(&mut s.confirm_staging, "Ask the same way on Staging connections");
+                });
+                row(ui, "Query timeout", "Cancel a SQL run that takes longer; 0 = never", &mut |ui| {
+                    ui.add(egui::DragValue::new(&mut s.query_timeout_secs).range(0..=86_400).speed(1).suffix(" s"));
                 });
                 ui.add_space(theme::space::SM);
                 ui.label(RichText::new("HELP").small().strong().color(t.muted_fg));
@@ -1368,6 +1408,15 @@ impl OpenvApp {
                 let logs = crate::store::config_dir().join("logs");
                 ui.add(egui::Label::new(RichText::new(format!("Logs: {}", logs.display())).small().color(t.muted_fg)).wrap());
                 ui.horizontal(|ui| {
+                    if ui.small_button(ico(ICON_FOLDER_OPEN, "Show workspace folder")).clicked() {
+                        crate::update::open_url(&crate::store::config_dir().display().to_string());
+                    }
+                    if ui.small_button(ico(ICON_UPLOAD_FILE, "Export connections…")).on_hover_text("Saves connections (no passwords) to a file").clicked() {
+                        export_ws = true;
+                    }
+                    if ui.small_button(ico(ICON_DOWNLOAD, "Import connections…")).on_hover_text("Adds connections from an exported file").clicked() {
+                        import_ws = true;
+                    }
                     if ui.small_button(ico(ICON_FOLDER_OPEN, "Open logs folder")).clicked() {
                         // The folder may not exist yet (nothing logged); file managers
                         // then open somewhere unrelated, so create it first.
@@ -1383,6 +1432,12 @@ impl OpenvApp {
         if check_now {
             self.cx.check_updates(true);
         }
+        if export_ws {
+            self.export_workspace();
+        }
+        if import_ws {
+            self.import_workspace();
+        }
         if open_keys {
             self.cx.show_shortcuts = true;
             self.cx.show_settings = false;
@@ -1392,6 +1447,44 @@ impl OpenvApp {
         }
         if format!("{:?}", before) != format!("{:?}", self.cx.store.ws.settings) {
             self.cx.mark_dirty();
+        }
+    }
+
+    /// Zoom and grid display options from Settings. Keyboard zoom (⌘=/⌘−)
+    /// changes egui's factor directly; keep the setting in step with it.
+    fn apply_display_settings(&mut self, ctx: &egui::Context) {
+        let s = &mut self.cx.store.ws.settings;
+        let z = ctx.zoom_factor();
+        if (z - self.applied_zoom).abs() > 0.001 {
+            // Changed with the keyboard.
+            s.ui_zoom = z;
+            self.applied_zoom = z;
+            self.cx.dirty = true;
+        } else if (s.ui_zoom - z).abs() > 0.001 {
+            let target = s.ui_zoom.clamp(0.5, 2.0);
+            ctx.set_zoom_factor(target);
+            self.applied_zoom = target;
+        }
+        crate::widgets::grid::set_display(&s.null_display, s.short_timestamps);
+    }
+
+    fn export_workspace(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("JSON", &["json"]).set_file_name("openvclient-connections.json").save_file() else { return };
+        match self.cx.store.export_profiles(&path) {
+            Ok(n) => self.cx.toasts.info(format!("Exported {n} connections"), format!("{}\nPasswords stay in this computer's keychain.", path.display())),
+            Err(e) => self.cx.toasts.error_text("Export failed", e),
+        }
+    }
+
+    fn import_workspace(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("JSON", &["json"]).pick_file() else { return };
+        match self.cx.store.import_profiles(&path) {
+            Ok((added, skipped)) => {
+                self.cx.mark_dirty();
+                let body = if skipped > 0 { format!("{skipped} already existed and were left as they are.") } else { "Passwords are asked for on first connect.".into() };
+                self.cx.toasts.info(format!("Imported {added} connections"), body);
+            }
+            Err(e) => self.cx.toasts.error_text("Import failed", e),
         }
     }
 
@@ -1541,12 +1634,15 @@ impl eframe::App for OpenvApp {
         self.handle_events();
         self.poll_updates(&ctx);
         self.shortcuts(&ctx);
+        self.apply_display_settings(&ctx);
 
         self.top_bar(ui);
         self.status_bar(ui);
-        egui::Panel::left("sidebar").resizable(true).default_size(290.0).size_range(200.0..=560.0).show(ui, |ui| {
-            views::sidebar::ui(ui, &mut self.cx);
-        });
+        if !self.cx.sidebar_hidden {
+            egui::Panel::left("sidebar").resizable(true).default_size(290.0).size_range(200.0..=560.0).show(ui, |ui| {
+                views::sidebar::ui(ui, &mut self.cx);
+            });
+        }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(ui.visuals().extreme_bg_color)).show(ui, |ui| {
             if self.tree.root.is_none() {
                 self.tree = Tree::new_tabs(egui::Id::unique("workspace"), vec![Tab { id: self.cx.tab_id(), kind: TabKind::Home }]);

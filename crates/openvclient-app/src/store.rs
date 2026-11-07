@@ -1,6 +1,6 @@
 //! Saved workspace (profiles, folders, preferences) and keychain secrets.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use openvclient_core::ConnectionProfile;
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,29 @@ pub struct Settings {
     /// Look for a newer release on GitHub at startup.
     #[serde(default = "default_true")]
     pub check_updates: bool,
+    /// Whole-app zoom (also ⌘= / ⌘−).
+    #[serde(default = "default_zoom")]
+    pub ui_zoom: f32,
+    /// How NULL cells are shown in grids.
+    #[serde(default = "default_null")]
+    pub null_display: String,
+    /// Drop fractional seconds from timestamps in grids (copy keeps the full value).
+    #[serde(default = "default_true")]
+    pub short_timestamps: bool,
+    /// Cancel a SQL run after this many seconds (0 = never).
+    #[serde(default)]
+    pub query_timeout_secs: u64,
+    /// Ask for the typed name on Staging connections too.
+    #[serde(default)]
+    pub confirm_staging: bool,
+}
+
+fn default_zoom() -> f32 {
+    1.0
+}
+
+fn default_null() -> String {
+    "NULL".into()
 }
 
 fn default_scroll() -> f32 {
@@ -79,6 +102,11 @@ impl Default for Settings {
             confirm_production: true,
             scroll_speed: default_scroll(),
             check_updates: true,
+            ui_zoom: default_zoom(),
+            null_display: default_null(),
+            short_timestamps: true,
+            query_timeout_secs: 0,
+            confirm_staging: false,
         }
     }
 }
@@ -236,6 +264,40 @@ impl Store {
             Some(slot) => *slot = p,
             None => self.ws.profiles.push(p),
         }
+    }
+
+    /// Write every connection, without secrets, to `path`. Passwords live in
+    /// the keychain; user:pass@ in connection strings is redacted too.
+    pub fn export_profiles(&self, path: &Path) -> Result<usize, String> {
+        let mut out = self.ws.profiles.clone();
+        for p in &mut out {
+            for v in p.params.values_mut() {
+                if v.contains("://") {
+                    *v = openvclient_core::redact(v);
+                }
+            }
+        }
+        let json = serde_json::to_vec_pretty(&serde_json::json!({ "openvclient_connections": 1, "profiles": out })).map_err(|e| e.to_string())?;
+        std::fs::write(path, json).map_err(|e| e.to_string())?;
+        Ok(out.len())
+    }
+
+    /// Add connections from an exported file. Existing ids are left alone.
+    pub fn import_profiles(&mut self, path: &Path) -> Result<(usize, usize), String> {
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let v: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| format!("Not a connections file: {e}"))?;
+        let list = v.get("profiles").cloned().ok_or("Not a connections file (no \"profiles\")")?;
+        let profiles: Vec<ConnectionProfile> = serde_json::from_value(list).map_err(|e| format!("Not a connections file: {e}"))?;
+        let (mut added, mut skipped) = (0, 0);
+        for p in profiles {
+            if self.ws.profiles.iter().any(|x| x.id == p.id) {
+                skipped += 1;
+            } else {
+                self.ws.profiles.push(p);
+                added += 1;
+            }
+        }
+        Ok((added, skipped))
     }
 
     pub fn remove(&mut self, id: Uuid) {

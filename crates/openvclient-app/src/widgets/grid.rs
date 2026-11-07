@@ -56,11 +56,24 @@ impl GridState {
 
 pub enum GridEvent {
     HeaderClicked(usize),
-    CommitEdit { row: usize, col: usize, text: String },
-    SetNull { row: usize, col: usize },
+    CommitEdit {
+        row: usize,
+        col: usize,
+        text: String,
+    },
+    SetNull {
+        row: usize,
+        col: usize,
+    },
     DeleteRows(Vec<usize>),
     RevertRow(usize),
     CopyRows(Vec<usize>, crate::export::Format),
+    /// Keep only rows whose `col` equals (or, with `exclude`, differs from) `value`.
+    FilterBy {
+        col: usize,
+        value: Value,
+        exclude: bool,
+    },
 }
 
 /// Per-row and per-cell decoration supplied by the owner (pending edits).
@@ -80,12 +93,49 @@ pub struct Grid<'a> {
     pub generation: u64,
     /// Row numbers start here (table paging offset).
     pub row_offset: u64,
+    /// The owner filters on the server, so "Exclude this value" is offered too.
+    pub server_filter: bool,
+}
+
+/// Grid display options from Settings (set once per frame by the app).
+static DISPLAY: std::sync::RwLock<(String, bool)> = std::sync::RwLock::new((String::new(), true));
+
+pub fn set_display(null: &str, short_timestamps: bool) {
+    if let Ok(mut d) = DISPLAY.write()
+        && (d.0 != null || d.1 != short_timestamps)
+    {
+        *d = (null.to_string(), short_timestamps);
+    }
+}
+
+/// "2026-11-06 03:24:26.677559+05:30" → "2026-11-06 03:24:26+05:30".
+fn trim_fraction(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let ok = b.len() >= 20 && b[4] == b'-' && b[7] == b'-' && (b[10] == b' ' || b[10] == b'T') && b[13] == b':' && b[16] == b':' && b[19] == b'.';
+    if !ok {
+        return None;
+    }
+    let frac_end = s[20..].find(|c: char| !c.is_ascii_digit()).map(|i| 20 + i).unwrap_or(s.len());
+    Some(format!("{}{}", &s[..19], &s[frac_end..]))
 }
 
 fn cell_text(v: &Value) -> (String, bool) {
+    let (null, short) = DISPLAY.read().map(|d| d.clone()).unwrap_or_default();
     match v {
-        Value::Null => ("NULL".into(), true),
+        Value::Null => (if null.is_empty() { "NULL".into() } else { null }, true),
+        Value::Text(t) if short => (trim_fraction(t).unwrap_or_else(|| t.clone()), false),
         other => (other.display().into_owned(), false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn trims_fractional_seconds() {
+        assert_eq!(super::trim_fraction("2026-11-06 03:24:26.677559+05:30").as_deref(), Some("2026-11-06 03:24:26+05:30"));
+        assert_eq!(super::trim_fraction("2026-11-06T03:24:26.5Z").as_deref(), Some("2026-11-06T03:24:26Z"));
+        assert_eq!(super::trim_fraction("2026-11-06 03:24:26"), None);
+        assert_eq!(super::trim_fraction("hello world, this is text"), None);
     }
 }
 
@@ -273,6 +323,16 @@ impl<'a> Grid<'a> {
                         });
                         if ui.button("View value…").clicked() {
                             st.detail_open = true;
+                            ui.close();
+                        }
+                        ui.separator();
+                        let v = rs.rows[r][c].clone();
+                        if ui.button(format!("Filter: {} = this value", rs.columns[c].name)).clicked() {
+                            events.push(GridEvent::FilterBy { col: c, value: v.clone(), exclude: false });
+                            ui.close();
+                        }
+                        if self.server_filter && ui.button(format!("Exclude: {} ≠ this value", rs.columns[c].name)).clicked() {
+                            events.push(GridEvent::FilterBy { col: c, value: v, exclude: true });
                             ui.close();
                         }
                         if self.editable {
