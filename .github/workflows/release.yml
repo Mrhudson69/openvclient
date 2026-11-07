@@ -64,9 +64,10 @@ jobs:
       - name: Build both architectures
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
-        run: |
-          cargo build --release --locked -p openvclient-app --target aarch64-apple-darwin
-          cargo build --release --locked -p openvclient-app --target x86_64-apple-darwin
+        # One cargo run for both targets: build scripts and proc macros are
+        # compiled once, and one target's final LTO link overlaps the other's
+        # compilation instead of leaving the runner's other cores idle.
+        run: cargo build --release --locked -p openvclient-app --target aarch64-apple-darwin --target x86_64-apple-darwin
       - name: Bundle universal .app
         run: |
           APP=dist/OpenVClient.app

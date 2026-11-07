@@ -23,6 +23,15 @@ env:
     pkg-config libssl-dev libxkbcommon-dev libwayland-dev
     libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libx11-dev libgl1-mesa-dev
 
+# Build caches (Swatinem/rust-cache) are saved from main only. The repository
+# has a 10 GB cache quota: when every pull request also saved its own ~1.5 GB
+# copies, they evicted main's caches and most runs compiled everything from
+# scratch. Pull requests restore main's caches, which GitHub allows.
+#
+# Build and test use the `ci` profile (Cargo.toml): the dev profile without
+# debug info and with unoptimised dependencies, which compiles in less than
+# half the time and keeps the caches small.
+
 jobs:
   fmt:
     name: rustfmt
@@ -45,6 +54,9 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Minimal feature build (SQLite only)
         run: cargo check -p openvclient-app --no-default-features --features sqlite
@@ -63,11 +75,14 @@ jobs:
           # The minimal profile has no clippy, which the Windows step below needs.
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - name: Build
-        run: cargo build --workspace --all-targets
+        run: cargo build --profile ci --workspace --all-targets
       # Live connector tests find no servers here and skip themselves.
       - name: Test
-        run: cargo test --workspace -- --nocapture
+        run: cargo test --profile ci --workspace -- --nocapture
       # The clippy job runs on Linux, so #[cfg(windows)] code is linted here.
       - name: Clippy (Windows-only code)
         if: runner.os == 'Windows'
@@ -77,84 +92,12 @@ jobs:
         shell: pwsh
         run: |
           .\scripts\install-innosetup.ps1 -Dir "$env:RUNNER_TEMP\innosetup"
-          & "$env:RUNNER_TEMP\innosetup\ISCC.exe" /Qp "/DSourceExe=$PWD\target\debug\openvclient.exe" "/DOutputDir=$env:RUNNER_TEMP\installer" installer\windows\openvclient.iss
+          & "$env:RUNNER_TEMP\innosetup\ISCC.exe" /Qp "/DSourceExe=$PWD\target\ci\openvclient.exe" "/DOutputDir=$env:RUNNER_TEMP\installer" installer\windows\openvclient.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   test-linux-live:
     name: test (ubuntu-latest, live services)
     runs-on: ubuntu-latest
-    # Host ports match the defaults in each connector's live test.
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 20
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-        ports: ["3306:3306"]
-        options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
-          --health-interval 5s --health-timeout 5s --health-retries 30
-      redis:
-        image: redis:7-alpine
-        ports: ["56379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s --health-timeout 3s --health-retries 20
-      mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: "Y"
-          MSSQL_SA_PASSWORD: "OpenVClient#2026"
-        ports: ["51433:1433"]
-        options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'OpenVClient#2026' -Q 'SELECT 1' -b"
-          --health-interval 10s --health-timeout 10s --health-retries 30 --health-start-period 20s
-      mongo:
-        image: mongo:7
-        env:
-          MONGO_INITDB_ROOT_USERNAME: root
-          MONGO_INITDB_ROOT_PASSWORD: ovcpass
-        ports: ["57017:27017"]
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping: 1})'"
-          --health-interval 5s --health-timeout 5s --health-retries 30
-      clickhouse:
-        image: clickhouse/clickhouse-server:24.8
-        env:
-          CLICKHOUSE_USER: ovc
-          CLICKHOUSE_PASSWORD: ovcpass
-          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-        ports: ["58123:8123"]
-        options: >-
-          --ulimit nofile=262144:262144
-          --health-cmd "clickhouse-client --user ovc --password ovcpass -q 'SELECT 1'"
-          --health-interval 5s --health-timeout 5s --health-retries 30
-      elasticsearch:
-        image: elasticsearch:8.15.0
-        env:
-          discovery.type: single-node
-          xpack.security.enabled: "false"
-          ES_JAVA_OPTS: -Xms512m -Xmx512m
-        ports: ["59200:9200"]
-        options: >-
-          --health-cmd "curl -fs http://localhost:9200/_cluster/health"
-          --health-interval 10s --health-timeout 5s --health-retries 30
-      rabbitmq:
-        image: rabbitmq:3-management
-        env:
-          RABBITMQ_DEFAULT_USER: ovc
-          RABBITMQ_DEFAULT_PASS: ovcpass
-        ports: ["55673:15672"]
-        options: >-
-          --health-cmd "rabbitmq-diagnostics -q ping"
-          --health-interval 10s --health-timeout 10s --health-retries 30
     env:
       OPENVCLIENT_PG_HOST: localhost
       OPENVCLIENT_PG_USER: postgres
@@ -166,27 +109,89 @@ jobs:
       OPENVCLIENT_MS_PORT: "51433"
       OPENVCLIENT_MS_PASSWORD: "OpenVClient#2026"
     steps:
+      # The test servers are started in the background, so their image pulls
+      # and start-up overlap the build instead of delaying it (as job
+      # `services:` would). "Wait for test servers" below checks they are
+      # healthy before the tests run. Host ports match the defaults in each
+      # connector's live test.
+      - name: Start test servers (background)
+        run: |
+          # S3 API server for the S3 connector test. The minio/minio image was
+          # removed from Docker Hub, so this uses SeaweedFS (same credentials).
+          printf '%s' '{"identities":[{"name":"ovc","credentials":[{"accessKey":"ovcadmin","secretKey":"ovcpass123"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > "$RUNNER_TEMP/s3.json"
+          {
+            docker run -d --name ovc-postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres \
+              --health-cmd "pg_isready -U postgres" \
+              --health-interval 5s --health-timeout 5s --health-retries 20 \
+              postgres:16 &
+            docker run -d --name ovc-mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root \
+              --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot" \
+              --health-interval 5s --health-timeout 5s --health-retries 30 \
+              mysql:8.0 &
+            docker run -d --name ovc-redis -p 56379:6379 \
+              --health-cmd "redis-cli ping" \
+              --health-interval 5s --health-timeout 3s --health-retries 20 \
+              redis:7-alpine &
+            docker run -d --name ovc-mssql -p 51433:1433 -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=OpenVClient#2026" \
+              --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'OpenVClient#2026' -Q 'SELECT 1' -b" \
+              --health-interval 10s --health-timeout 10s --health-retries 30 --health-start-period 20s \
+              mcr.microsoft.com/mssql/server:2022-latest &
+            docker run -d --name ovc-mongo -p 57017:27017 \
+              -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=ovcpass \
+              --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping: 1})'" \
+              --health-interval 5s --health-timeout 5s --health-retries 30 \
+              mongo:7 &
+            docker run -d --name ovc-clickhouse -p 58123:8123 \
+              -e CLICKHOUSE_USER=ovc -e CLICKHOUSE_PASSWORD=ovcpass -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+              --ulimit nofile=262144:262144 \
+              --health-cmd "clickhouse-client --user ovc --password ovcpass -q 'SELECT 1'" \
+              --health-interval 5s --health-timeout 5s --health-retries 30 \
+              clickhouse/clickhouse-server:24.8 &
+            docker run -d --name ovc-elasticsearch -p 59200:9200 \
+              -e discovery.type=single-node -e xpack.security.enabled=false -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+              --health-cmd "curl -fs http://localhost:9200/_cluster/health" \
+              --health-interval 10s --health-timeout 5s --health-retries 30 \
+              elasticsearch:8.15.0 &
+            docker run -d --name ovc-rabbitmq -p 55673:15672 \
+              -e RABBITMQ_DEFAULT_USER=ovc -e RABBITMQ_DEFAULT_PASS=ovcpass \
+              --health-cmd "rabbitmq-diagnostics -q ping" \
+              --health-interval 10s --health-timeout 10s --health-retries 30 \
+              rabbitmq:3-management &
+            docker run -d --name ovc-s3 -p 59000:8333 -v "$RUNNER_TEMP/s3.json:/etc/s3.json:ro" \
+              chrislusf/seaweedfs:4.50 server -s3 -s3.config=/etc/s3.json &
+            # live_docker exercises the container named openvclient-test-redis.
+            docker run -d --name openvclient-test-redis redis:7-alpine &
+            wait
+          } > "$RUNNER_TEMP/servers.log" 2>&1 &
       - uses: actions/checkout@v7
       - name: Install Linux build dependencies and DB client tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends $LINUX_DEPS postgresql-client mysql-client
-      # Services that need a custom command, or that the Docker test drives.
-      - name: Start extra test containers
-        run: |
-          # S3 API server for the S3 connector test. The minio/minio image was
-          # removed from Docker Hub, so this uses SeaweedFS (same credentials).
-          printf '%s' '{"identities":[{"name":"ovc","credentials":[{"accessKey":"ovcadmin","secretKey":"ovcpass123"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > "$RUNNER_TEMP/s3.json"
-          docker run -d --name ovc-s3 -p 59000:8333 -v "$RUNNER_TEMP/s3.json:/etc/s3.json:ro" \
-            chrislusf/seaweedfs:4.50 server -s3 -s3.config=/etc/s3.json
-          # live_docker exercises the container named openvclient-test-redis.
-          docker run -d --name openvclient-test-redis redis:7-alpine
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - name: Build
-        run: cargo build --workspace --all-targets
-      - name: Wait for the S3 server
+        run: cargo build --profile ci --workspace --all-targets
+      - name: Wait for test servers
         run: |
+          servers="ovc-postgres ovc-mysql ovc-redis ovc-mssql ovc-mongo ovc-clickhouse ovc-elasticsearch ovc-rabbitmq"
+          deadline=$((SECONDS + 600))
+          for c in $servers; do
+            until [ "$(docker inspect -f '{{.State.Health.Status}}' "$c" 2>/dev/null)" = healthy ]; do
+              status=$(docker inspect -f '{{.State.Health.Status}}' "$c" 2>/dev/null || echo missing)
+              if [ "$status" = unhealthy ] || [ $SECONDS -ge $deadline ]; then
+                echo "::error::test server $c is $status"
+                cat "$RUNNER_TEMP/servers.log"
+                docker logs --tail 50 "$c" || true
+                exit 1
+              fi
+              sleep 2
+            done
+            echo "$c healthy"
+          done
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://127.0.0.1:59000/ && exit 0
             sleep 2
@@ -197,7 +202,7 @@ jobs:
       - name: Test (live connectors)
         run: |
           set -o pipefail
-          cargo test --workspace -- --nocapture 2>&1 | tee test.log
+          cargo test --profile ci --workspace -- --nocapture 2>&1 | tee test.log
       - name: Show skipped live tests
         if: always()
         run: grep -i "skipping" test.log || echo "no live test skipped"

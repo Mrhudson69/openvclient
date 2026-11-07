@@ -16,7 +16,8 @@ By participating you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). 
    cargo build --workspace           # everything
    cargo test --workspace            # unit tests + live tests (skip without servers)
    ```
-   Dependencies are built with `opt-level = 2` even in debug builds (see `[profile.dev.package."*"]`), so the dev build stays responsive.
+   Dependencies are built with `opt-level = 1` even in debug builds (see `[profile.dev.package."*"]`), so the dev build stays responsive.
+   When you only need to build and run the tests, `cargo test --profile ci --workspace` is much faster from a clean target directory: the `ci` profile, which CI uses, skips debug info and dependency optimisation. It builds into `target/ci/`, separate from `target/debug/`.
 4. Optional: start the live test services ([section 5](#5-testing)) so the connector tests run instead of skipping.
 
 Useful environment variables:
@@ -292,7 +293,7 @@ async fn live_foo() {
 }
 ```
 
-Use a high, unusual host port (5xxxx) for the test container, and allow overrides through `OPENVCLIENT_FOO_*` environment variables. Add the container to the CI service list in `.github/workflows/ci.yml`.
+Use a high, unusual host port (5xxxx) for the test container, and allow overrides through `OPENVCLIENT_FOO_*` environment variables. Add the container to the "Start test servers" step in `.github/workflows/ci.yml`, and its name to the "Wait for test servers" step if it has a health check.
 
 ---
 
