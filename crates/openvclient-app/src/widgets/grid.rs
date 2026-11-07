@@ -128,17 +128,6 @@ fn cell_text(v: &Value) -> (String, bool) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn trims_fractional_seconds() {
-        assert_eq!(super::trim_fraction("2026-11-06 03:24:26.677559+05:30").as_deref(), Some("2026-11-06 03:24:26+05:30"));
-        assert_eq!(super::trim_fraction("2026-11-06T03:24:26.5Z").as_deref(), Some("2026-11-06T03:24:26Z"));
-        assert_eq!(super::trim_fraction("2026-11-06 03:24:26"), None);
-        assert_eq!(super::trim_fraction("hello world, this is text"), None);
-    }
-}
-
 fn initial_width(rs: &ResultSet, c: usize) -> f32 {
     let mut chars = rs.columns[c].name.len().max(rs.columns[c].type_name.len() / 2 + 2);
     for r in rs.rows.iter().take(50) {
@@ -400,5 +389,16 @@ pub fn detail_window(ctx: &egui::Context, id: egui::Id, rs: &ResultSet, st: &mut
     });
     if !open {
         st.detail_open = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn trims_fractional_seconds() {
+        assert_eq!(super::trim_fraction("2026-11-06 03:24:26.677559+05:30").as_deref(), Some("2026-11-06 03:24:26+05:30"));
+        assert_eq!(super::trim_fraction("2026-11-06T03:24:26.5Z").as_deref(), Some("2026-11-06T03:24:26Z"));
+        assert_eq!(super::trim_fraction("2026-11-06 03:24:26"), None);
+        assert_eq!(super::trim_fraction("hello world, this is text"), None);
     }
 }

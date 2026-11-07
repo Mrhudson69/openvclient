@@ -132,7 +132,10 @@ fn recent_queries(ui: &mut egui::Ui, cx: &mut AppCtx) {
                     let (icon, color) = if h.ok { (ICON_CHECK_CIRCLE, t.accent) } else { (ICON_ERROR, t.destructive) };
                     ui.label(RichText::new(String::from(icon)).color(color));
                     let txt_w = (ui.available_width() - 260.0).max(120.0);
-                    ui.add_sized([txt_w, 20.0], egui::Label::new(RichText::new(&first).monospace()).truncate());
+                    ui.allocate_ui_with_layout(egui::vec2(txt_w, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.set_width(txt_w);
+                        ui.add(egui::Label::new(RichText::new(&first).monospace()).truncate());
+                    });
                     ui.add(egui::Label::new(RichText::new(format!("{name} · {}", short_time(&h.at))).small().color(t.muted_fg)).truncate());
                 })
                 .response

@@ -91,7 +91,7 @@ fn fuzzy(needle: &str, hay: &str) -> Option<i32> {
     } else {
         120
     };
-    score -= (l.chars().count() as i32 - q.chars().count() as i32).max(0).min(60);
+    score -= (l.chars().count() as i32 - q.chars().count() as i32).clamp(0, 60);
     Some(score)
 }
 

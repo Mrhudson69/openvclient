@@ -64,6 +64,16 @@ pub enum Cmd {
     RefreshTree(Uuid),
     InvalidateCatalog(Uuid),
     FocusTab(u64),
+    OpenErd {
+        conn: Uuid,
+        database: Option<String>,
+        schema: String,
+    },
+    OpenCompare {
+        conn: Uuid,
+        database: Option<String>,
+        schema: String,
+    },
 }
 
 /// Tab-strip requests (context menu, open-tabs list), applied after the
@@ -258,6 +268,8 @@ pub enum TabKind {
     Resource(Box<views::resource::ResourceTab>),
     Terminal(Box<views::terminal::TerminalTab>),
     Files(Box<views::files::FilesTab>),
+    Erd(Box<views::erd::ErdTab>),
+    Compare(Box<views::compare::CompareTab>),
 }
 
 pub struct Tab {
@@ -289,7 +301,7 @@ impl Tab {
                 let (database, text) = t.reopen_parts();
                 Cmd::NewSql { conn: t.conn, database, text }
             }
-            TabKind::Table(t) => Cmd::OpenTable { conn: t.conn, kind: t.kind.clone(), path: t.path.clone() },
+            TabKind::Table(t) => Cmd::OpenTable { conn: t.conn, kind: t.kind, path: t.path.clone() },
             TabKind::Monitor(t) => Cmd::OpenMonitor(t.conn),
             TabKind::Users(t) => Cmd::OpenUsers(t.conn),
             TabKind::Terminal(t) => Cmd::OpenTerminal(t.conn),
@@ -312,6 +324,8 @@ impl Tab {
             TabKind::Resource(t) => Some(t.conn),
             TabKind::Terminal(t) => Some(t.conn),
             TabKind::Files(t) => Some(t.conn),
+            TabKind::Erd(t) => Some(t.conn),
+            TabKind::Compare(t) => Some(t.left.conn),
         }
     }
 
@@ -329,6 +343,8 @@ impl Tab {
             TabKind::Resource(t) => t.node.as_ref().map(|n| views::resource::node_icon(n.icon)).unwrap_or(ICON_DNS),
             TabKind::Terminal(_) => ICON_TERMINAL,
             TabKind::Files(_) => ICON_FOLDER_OPEN,
+            TabKind::Erd(_) => ICON_SCHEMA,
+            TabKind::Compare(_) => ICON_COMPARE_ARROWS,
         }
     }
 
@@ -349,6 +365,8 @@ impl Tab {
             },
             TabKind::Terminal(_) => ico(ICON_TERMINAL, &format!("Terminal · {conn}")),
             TabKind::Files(t) => ico(ICON_FOLDER_OPEN, &format!("{conn} · {}", t.title())),
+            TabKind::Erd(t) => ico(ICON_SCHEMA, &format!("{conn} · {}", t.title())),
+            TabKind::Compare(_) => ico(ICON_COMPARE_ARROWS, "Compare schemas"),
         }
     }
 
@@ -364,6 +382,8 @@ impl Tab {
             TabKind::Docker(t) => Some(format!("docker:{}", t.conn)),
             TabKind::Resource(t) => Some(format!("res:{}", t.conn)),
             TabKind::Files(t) => Some(format!("files:{}", t.conn)),
+            TabKind::Erd(t) => Some(format!("erd:{}:{:?}:{}", t.conn, t.database, t.schema)),
+            TabKind::Compare(_) => None,
             TabKind::Sql(_) | TabKind::Terminal(_) => None,
         }
     }
@@ -397,6 +417,8 @@ impl Behavior<Tab> for Viewer<'_> {
                 TabKind::Resource(t) => t.ui(ui, self.cx, id),
                 TabKind::Terminal(t) => t.ui(ui, self.cx),
                 TabKind::Files(t) => t.ui(ui, self.cx),
+                TabKind::Erd(t) => t.ui(ui, self.cx),
+                TabKind::Compare(t) => t.ui(ui, self.cx),
             }
         });
         UiResponse::None
@@ -761,6 +783,8 @@ impl OpenvApp {
                     self.open(TabKind::Table(Box::new(t)));
                 }
                 Cmd::OpenObject { conn, kind, path } => self.open(TabKind::Object(Box::new(views::object::ObjectTab::new(conn, kind, path)))),
+                Cmd::OpenErd { conn, database, schema } => self.open(TabKind::Erd(Box::new(views::erd::ErdTab::new(conn, database, schema)))),
+                Cmd::OpenCompare { conn, database, schema } => self.open(TabKind::Compare(Box::new(views::compare::CompareTab::new(conn, database, schema)))),
                 Cmd::OpenMonitor(conn) => self.open(TabKind::Monitor(Box::new(views::monitor::MonitorTab::new(conn)))),
                 Cmd::OpenUsers(conn) => self.open(TabKind::Users(Box::new(views::users::UsersTab::new(conn)))),
                 Cmd::OpenTerminal(conn) => self.open(TabKind::Terminal(Box::new(views::terminal::TerminalTab::new(conn)))),
@@ -1938,6 +1962,58 @@ mod walkthrough {
         shot(&mut h, &out, "13b-about");
         h.state_mut().cx.show_about = false;
         h.state_mut().cx.show_settings = false;
+
+        // New features: ER diagram, schema compare, chart, formatter, session restore.
+        h.state_mut().cx.cmd(Cmd::OpenErd { conn: pg, database: Some(demo_db()), schema: "sales".into() });
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "15-erd");
+        h.state_mut().cx.cmd(Cmd::OpenCompare { conn: pg, database: Some(demo_db()), schema: "sales".into() });
+        for _ in 0..3 {
+            h.step();
+        }
+        {
+            let app = h.state_mut();
+            if let Some(tid) = app.find(|t| matches!(t.kind, TabKind::Compare(_)))
+                && let Some(Tile::Pane(Tab { kind: TabKind::Compare(c), .. })) = app.tree.tiles.get_mut(tid)
+            {
+                c.right.schema = "public".into();
+                c.start(&mut app.cx);
+            }
+        }
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "16-compare");
+        let messy = "select c.country, count(*) as orders, round(sum(o.amount),2) as revenue from sales.orders o join sales.customers c on c.id=o.customer_id where o.status='shipped' and o.amount>10 group by 1 order by revenue desc;";
+        h.state_mut().cx.cmd(Cmd::NewSql { conn: pg, database: Some(demo_db()), text: messy.into() });
+        std::thread::sleep(Duration::from_millis(600));
+        for _ in 0..10 {
+            h.step();
+        }
+        {
+            let app = h.state_mut();
+            if let Some(Tile::Pane(Tab { kind: TabKind::Sql(t), .. })) = app.focused.and_then(|f| app.tree.tiles.get_mut(f)) {
+                t.test_format_and_chart(&mut app.cx, true, false);
+            }
+        }
+        h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Enter);
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "17-formatted");
+        {
+            let app = h.state_mut();
+            if let Some(Tile::Pane(Tab { kind: TabKind::Sql(t), .. })) = app.focused.and_then(|f| app.tree.tiles.get_mut(f)) {
+                t.test_format_and_chart(&mut app.cx, false, true);
+            }
+        }
+        shot(&mut h, &out, "18-chart");
+        {
+            let app = h.state_mut();
+            app.cx.restore_offer = vec![crate::store::SavedTab::Sql { conn: pg, database: Some(demo_db()), text: "SELECT 1".into() }, crate::store::SavedTab::Monitor { conn: pg }];
+        }
         apply_theme(&h.ctx, ThemeChoice::Light);
         h.state_mut().cx.cmd(Cmd::OpenHome);
         for _ in 0..6 {
@@ -1988,7 +2064,7 @@ mod walkthrough {
         // Seed: a container with folders and a few typical files.
         let dir = std::env::temp_dir().join("ovc-files-shots");
         std::fs::create_dir_all(&dir).unwrap();
-        let files = [("alert_dump_01.00.parquet", 1_089_246), ("asset_dump_01.00.parquet", 742_311), ("summary.json", 2_048), ("readme.txt", 512), ("export.csv", 96_000)];
+        let files = [("alert_dump_01.00.parquet", 1_089_246), ("asset_dump_01.00.parquet", 742_311), ("summary.json", 2_048), ("readme.txt", 512), ("export.csv", 96_000), ("chart.png", 0)];
         rt.block_on(async {
             let mut a = Args::new();
             a.insert("name".into(), "analytics-exports".into());
@@ -2004,6 +2080,16 @@ mod walkthrough {
                     r#"{"alerts": 128, "assets": 3402, "generated": "2026-02-24T12:43:17Z"}"#.as_bytes().to_vec()
                 } else if name.ends_with(".txt") {
                     b"Daily export from the analytics pipeline.\n".to_vec()
+                } else if name.ends_with(".png") {
+                    // A small generated chart, so the image preview has something to show.
+                    let img = image::RgbaImage::from_fn(320, 180, |x, y| {
+                        let bar = x / 40;
+                        let h = 40 + (bar * 37) % 130;
+                        if 180 - y < h && x % 40 > 6 { image::Rgba([34, 197, 94, 255]) } else { image::Rgba([241, 245, 249, 255]) }
+                    });
+                    let mut buf = std::io::Cursor::new(Vec::new());
+                    img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+                    buf.into_inner()
                 } else {
                     vec![b'x'; size]
                 };
@@ -2043,6 +2129,19 @@ mod walkthrough {
         }
         settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
         shot(&mut h, &out, "f3-files-preview");
+        {
+            let app = h.state_mut();
+            if let Some(tid) = app.find(|t| matches!(t.kind, TabKind::Files(_)))
+                && let Some(Tile::Pane(Tab { kind: TabKind::Files(f), .. })) = app.tree.tiles.get_mut(tid)
+            {
+                f.click_name(&app.cx, "chart.png");
+            }
+        }
+        for _ in 0..4 {
+            h.step();
+        }
+        settle(&mut h, |a| a.cx.bg.running().is_empty(), Duration::from_secs(10));
+        shot(&mut h, &out, "f3b-image-preview");
         h.state_mut().cx.store.ws.settings.theme = crate::store::ThemeChoice::Light;
         apply_theme(&h.ctx, crate::store::ThemeChoice::Light);
         shot(&mut h, &out, "f4-files-light");

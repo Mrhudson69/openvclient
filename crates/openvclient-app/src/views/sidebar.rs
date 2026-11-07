@@ -593,6 +593,16 @@ fn object_menu(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, n: &TreeNode) {
     }
     match n.kind {
         ObjectKind::Database => {
+            if d == openvclient_core::sqltext::Dialect::MySql {
+                if ui.button(ico(ICON_SCHEMA, "ER diagram")).clicked() {
+                    cx.cmd(Cmd::OpenErd { conn: id, database: n.path.database.clone(), schema: n.label.clone() });
+                    ui.close();
+                }
+                if ui.button(ico(ICON_COMPARE_ARROWS, "Compare with…")).clicked() {
+                    cx.cmd(Cmd::OpenCompare { conn: id, database: n.path.database.clone(), schema: n.label.clone() });
+                    ui.close();
+                }
+            }
             if ui.button(ico(ICON_CODE, "New SQL editor")).clicked() {
                 cx.cmd(Cmd::NewSql { conn: id, database: n.path.database.clone(), text: String::new() });
                 ui.close();
@@ -655,6 +665,14 @@ fn object_menu(ui: &mut egui::Ui, cx: &mut AppCtx, id: Uuid, n: &TreeNode) {
             }
         }
         ObjectKind::Schema => {
+            if ui.button(ico(ICON_SCHEMA, "ER diagram")).clicked() {
+                cx.cmd(Cmd::OpenErd { conn: id, database: n.path.database.clone(), schema: n.label.clone() });
+                ui.close();
+            }
+            if ui.button(ico(ICON_COMPARE_ARROWS, "Compare with…")).clicked() {
+                cx.cmd(Cmd::OpenCompare { conn: id, database: n.path.database.clone(), schema: n.label.clone() });
+                ui.close();
+            }
             if ui.button(ico(ICON_CODE, "New SQL editor")).clicked() {
                 let text = if d == openvclient_core::sqltext::Dialect::Postgres { format!("SET search_path TO {};\n\n", d.quote_ident(&n.label)) } else { String::new() };
                 cx.cmd(Cmd::NewSql { conn: id, database: n.path.database.clone(), text });

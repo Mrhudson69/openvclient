@@ -57,6 +57,8 @@ pub struct FilesTab {
     preview_w: f32,
     /// Right-click on empty space in the list opens this menu at the pointer.
     blank_menu: Option<egui::Pos2>,
+    /// Decoded preview image, keyed by entry id (or the decode error).
+    preview_tex: Option<(String, std::result::Result<egui::TextureHandle, String>)>,
     preview_job: Option<Job<Result<Content>>>,
     batch: Option<Batch>,
     modal: Option<Modal>,
@@ -122,6 +124,7 @@ impl FilesTab {
             preview: None,
             preview_w: 340.0,
             blank_menu: None,
+            preview_tex: None,
             preview_job: None,
             batch: None,
             modal: None,
@@ -919,6 +922,30 @@ impl FilesTab {
                         }
                         Content::Empty(m) => {
                             ui.label(RichText::new(m).color(t.muted_fg));
+                        }
+                        Content::Image(bytes) => {
+                            if self.preview_tex.as_ref().is_none_or(|(id, _)| *id != e.id) {
+                                let tex = image::load_from_memory(bytes).map_err(|err| format!("Could not read this image: {err}")).map(|img| {
+                                    // Keep textures modest; the pane is a few hundred points wide.
+                                    let img = if img.width() > 2048 || img.height() > 2048 { img.thumbnail(2048, 2048) } else { img };
+                                    let rgba = img.to_rgba8();
+                                    let ci = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw());
+                                    ui.ctx().load_texture(format!("preview:{}", e.id), ci, egui::TextureOptions::LINEAR)
+                                });
+                                self.preview_tex = Some((e.id.clone(), tex));
+                            }
+                            match &self.preview_tex {
+                                Some((_, Ok(tex))) => {
+                                    let size = tex.size_vec2();
+                                    let w = ui.available_width().min(size.x);
+                                    ui.add(egui::Image::new(tex).fit_to_exact_size(egui::vec2(w, w * size.y / size.x.max(1.0))));
+                                    ui.label(RichText::new(format!("{} × {} px", size.x as u32, size.y as u32)).small().color(t.muted_fg));
+                                }
+                                Some((_, Err(m))) => {
+                                    ui.label(RichText::new(m).color(t.muted_fg));
+                                }
+                                None => {}
+                            }
                         }
                         _ => {
                             ui.label(RichText::new("No preview for this file type. Use Download.").color(t.muted_fg));

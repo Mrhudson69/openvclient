@@ -50,6 +50,9 @@ pub struct SqlTab {
     in_tx: bool,
     /// Name typed in the "Save as snippet" box.
     snippet_name: String,
+    /// Results shown as a chart instead of the grid.
+    chart_view: bool,
+    chart: crate::widgets::chart::ChartState,
     results: Vec<StatementResult>,
     grids: Vec<GridState>,
     active: usize,
@@ -97,6 +100,8 @@ impl SqlTab {
             manual_tx: false,
             in_tx: false,
             snippet_name: String::new(),
+            chart_view: false,
+            chart: Default::default(),
             results: Vec::new(),
             grids: Vec::new(),
             active: 0,
@@ -112,6 +117,14 @@ impl SqlTab {
             last_cursor: None,
             last_selection: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn test_format_and_chart(&mut self, cx: &mut AppCtx, format: bool, chart: bool) {
+        if format {
+            self.format(cx);
+        }
+        self.chart_view = chart;
     }
 
     /// Reformat the selection, or the whole editor when nothing is selected.
@@ -132,10 +145,11 @@ impl SqlTab {
         }
     }
 
-    fn snippets_menu(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+    fn snippets_menu(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx, compact: bool) {
         let n = cx.store.ws.snippets.len();
         let title = if n > 0 { format!("Snippets ({n})") } else { "Snippets".to_string() };
-        ui.menu_button(ico(ICON_BOOKMARKS, &title), |ui| {
+        let label = if compact { String::from(ICON_BOOKMARKS) } else { ico(ICON_BOOKMARKS, &title) };
+        ui.menu_button(label, |ui| {
             ui.set_min_width(300.0);
             ui.label(RichText::new("Save the editor (or selection) as a snippet").small().color(theme::muted(ui)));
             ui.horizontal(|ui| {
@@ -149,7 +163,7 @@ impl SqlTab {
                     let name = self.snippet_name.trim().to_string();
                     cx.store.ws.snippets.retain(|s| s.name != name);
                     cx.store.ws.snippets.push(crate::store::Snippet { name: name.clone(), sql: body.trim().to_string() });
-                    cx.store.ws.snippets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                    cx.store.ws.snippets.sort_by_key(|a| a.name.to_lowercase());
                     cx.mark_dirty();
                     cx.toasts.ok(format!("Saved snippet {name}"));
                     self.snippet_name.clear();
@@ -168,7 +182,6 @@ impl SqlTab {
                         // Insert at the cursor (replacing a selection).
                         let at = self
                             .last_selection
-                            .map(|(a, b)| (a, b))
                             .or(self.last_cursor.map(|c| (c, c)))
                             .filter(|(a, b)| *b <= self.text.len() && self.text.is_char_boundary(*a) && self.text.is_char_boundary(*b))
                             .unwrap_or((self.text.len(), self.text.len()));
@@ -388,7 +401,9 @@ impl SqlTab {
 
         let mut want: Option<(bool, bool)> = None; // (all, explain)
         let mut want_analyze = false;
-        // Toolbar.
+        // Toolbar. Narrow windows get icon-only secondary buttons (labels in tooltips).
+        let compact = ui.available_width() < 1150.0;
+        let lab = |icon: egui_material_icons::MaterialIcon, text: &str| if compact { String::from(icon) } else { ico(icon, text) };
         ui.horizontal(|ui| {
             if running {
                 if theme::danger_button(ui, ico(ICON_STOP, &theme::kbd("Cancel  ⌘."))).clicked()
@@ -407,15 +422,18 @@ impl SqlTab {
                 if theme::primary_button(ui, ico(ICON_PLAY_ARROW, label)).on_hover_text(theme::kbd(tip)).clicked() {
                     want = Some((false, false));
                 }
-                if ui.button(ico(ICON_PLAYLIST_PLAY, "Run all")).on_hover_text(theme::kbd("Whole script (⌘⇧⏎)")).clicked() {
+                if ui.button(lab(ICON_PLAYLIST_PLAY, "Run all")).on_hover_text(theme::kbd("Whole script (⌘⇧⏎)")).clicked() {
                     want = Some((true, false));
                 }
             }
-            if caps.explain && ui.add_enabled(!running, egui::Button::new(ico(ICON_ACCOUNT_TREE, "Explain"))).on_hover_text(theme::kbd("Query plan for the statement at cursor (⌘E)")).clicked() {
+            if caps.explain && ui.add_enabled(!running, egui::Button::new(lab(ICON_ACCOUNT_TREE, "Explain"))).on_hover_text(theme::kbd("Query plan for the statement at cursor (⌘E)")).clicked() {
                 want = Some((false, true));
             }
             if caps.explain_analyze
-                && ui.add_enabled(!running, egui::Button::new(ico(ICON_SPEED, "Analyze"))).on_hover_text("EXPLAIN ANALYZE: executes the statement; data changes are rolled back").clicked()
+                && ui
+                    .add_enabled(!running, egui::Button::new(lab(ICON_SPEED, "Analyze")))
+                    .on_hover_text("EXPLAIN ANALYZE runs the statement for real timings. Data changes are rolled back where the engine allows it; do not analyze writes on production.")
+                    .clicked()
             {
                 want_analyze = true;
             }
@@ -436,15 +454,15 @@ impl SqlTab {
                 self.save(cx, false);
             }
             ui.separator();
-            if ui.add_enabled(!running, egui::Button::new(ico(ICON_FORMAT_ALIGN_LEFT, "Format"))).on_hover_text(theme::kbd("Tidy the SQL, or just the selection (⌘⇧F)")).clicked()
+            if ui.add_enabled(!running, egui::Button::new(lab(ICON_FORMAT_ALIGN_LEFT, "Format"))).on_hover_text(theme::kbd("Tidy the SQL, or just the selection (⌘⇧F)")).clicked()
                 || (format_now && !running)
             {
                 self.format(cx);
             }
-            self.snippets_menu(ui, cx);
+            self.snippets_menu(ui, cx, compact);
             // Transaction control.
             if self.in_tx {
-                ui.label(RichText::new(ico(ICON_PENDING, "Transaction open")).color(t.warning)).on_hover_text("Changes are not visible to others until you commit");
+                ui.label(RichText::new(lab(ICON_PENDING, "Transaction open")).color(t.warning)).on_hover_text("Changes are not visible to others until you commit");
                 if ui.add_enabled(!running, egui::Button::new(ico(ICON_CHECK, "Commit"))).clicked() {
                     self.start(cx, vec![tx_sql(self.dialect, "COMMIT")], true);
                 }
@@ -457,7 +475,7 @@ impl SqlTab {
                 } else {
                     ("Auto-commit", "Each statement is saved as soon as it runs. Click for manual transactions.")
                 };
-                if ui.selectable_label(self.manual_tx, ico(if self.manual_tx { ICON_LOCK } else { ICON_BOLT }, label)).on_hover_text(tip).clicked() {
+                if ui.selectable_label(self.manual_tx, lab(if self.manual_tx { ICON_LOCK } else { ICON_BOLT }, label)).on_hover_text(format!("{label}: {tip}")).clicked() {
                     self.manual_tx = !self.manual_tx;
                 }
             }
@@ -673,6 +691,13 @@ impl SqlTab {
                                 theme::badge(ui, "LIMITED", t.warning).on_hover_text(format!("Only the first {} rows were kept (Settings → Max rows).", rs.rows.len()));
                             }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let chartable = !crate::widgets::chart::numeric_columns(&rs).is_empty();
+                                if chartable {
+                                    ui.selectable_value(&mut self.chart_view, true, ico(ICON_BAR_CHART, "Chart"));
+                                    ui.selectable_value(&mut self.chart_view, false, ico(ICON_TABLE_ROWS, "Table"));
+                                } else {
+                                    self.chart_view = false;
+                                }
                                 ui.menu_button(ico(ICON_DOWNLOAD, "Export"), |ui| {
                                     for f in Format::ALL {
                                         if ui.button(format!("{}…", f.label())).clicked() {
@@ -685,6 +710,11 @@ impl SqlTab {
                                 ui.add(egui::TextEdit::singleline(&mut st.filter).hint_text(ico(ICON_SEARCH, "Filter rows")).desired_width(200.0));
                             });
                         });
+                        if self.chart_view {
+                            let rows = st.view(&rs, self.generation, false).to_vec();
+                            crate::widgets::chart::show(ui, &rs, &rows, &mut self.chart);
+                            return;
+                        }
                         events.extend(
                             Grid {
                                 id: egui::Id::unique(("grid", tab_id, self.active, self.generation)),

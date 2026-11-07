@@ -429,5 +429,8 @@ fn content_inline(ui: &mut egui::Ui, c: &Content) {
         Content::Empty(m) => {
             ui.label(RichText::new(m).color(t.muted_fg));
         }
+        Content::Image(b) => {
+            ui.label(RichText::new(format!("Image ({}); open it in the file manager to see it", openvclient_core::containers::human_bytes(b.len() as u64))).color(t.muted_fg));
+        }
     }
 }

@@ -365,6 +365,9 @@ impl ResourceSession for SshSession {
         let path = node.strip_prefix("f:").ok_or_else(|| Error::invalid("Bad node"))?;
         let sftp = self.sftp()?;
         let meta = sftp.metadata(path).await.map_err(sftp_err)?;
+        if openvclient_core::resource::is_image_name(path) && meta.len() <= openvclient_core::resource::IMAGE_PREVIEW_MAX {
+            return Ok(Content::Image(sftp.read(path).await.map_err(sftp_err)?));
+        }
         if meta.len() > PREVIEW_MAX {
             return Ok(Content::Empty(format!("{} is larger than 1 MiB; use Download", openvclient_core::containers::human_bytes(meta.len()))));
         }
