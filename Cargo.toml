@@ -42,8 +42,23 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# Dependencies are optimised in debug builds so the dev app stays responsive
+# (egui layout and text shaping are slow unoptimised). opt-level 1 keeps most
+# of that speed-up and compiles a clean debug build about 23% faster than 2.
 [profile.dev.package."*"]
-opt-level = 2
+opt-level = 1
+
+# CI build and test: the dev profile (same debug assertions and overflow
+# checks) without debug info and with unoptimised dependencies. A clean build
+# takes less than half as long, and the cached target directory is much
+# smaller. Tests don't need optimised dependencies; the debug app
+# does (egui), so the dev profile keeps them. Use with `cargo build/test --profile ci`.
+[profile.ci]
+inherits = "dev"
+debug = 0
+
+[profile.ci.package."*"]
+opt-level = 0
 
 [workspace.lints.clippy]
 # Long closure/channel types are clearer inline than as one-off aliases.
