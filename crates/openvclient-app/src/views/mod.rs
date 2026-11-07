@@ -111,6 +111,8 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("General", "⌘N", "New connection"),
     ("General", "⌘⇧H", "Home"),
     ("General", "⌘W", "Close tab"),
+    ("General", "⌘⇧T", "Reopen closed tab"),
+    ("General", "⌘1 … ⌘9", "Switch to tab 1–8, or the last tab"),
     ("General", "F5", "Refresh the current view"),
     ("General", "⌘/", "Keyboard shortcuts"),
     ("SQL editor", "⌘T", "New SQL editor for the focused connection"),

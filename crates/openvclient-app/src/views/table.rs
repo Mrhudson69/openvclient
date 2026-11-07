@@ -175,12 +175,7 @@ impl TableTab {
         let mut apply = refresh;
         ui.horizontal(|ui| {
             ui.label(RichText::new("WHERE").monospace().strong().color(t.muted_fg));
-            let r = ui.add(
-                egui::TextEdit::singleline(&mut self.filter)
-                    .font(egui::TextStyle::Monospace)
-                    .hint_text("e.g. status = 'active' AND created_at > now() - interval '1 day'")
-                    .desired_width(ui.available_width() - 210.0),
-            );
+            let r = ui.add(egui::TextEdit::singleline(&mut self.filter).font(egui::TextStyle::Monospace).hint_text(where_example(dialect)).desired_width(ui.available_width() - 210.0));
             if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 apply = true;
             }
@@ -496,5 +491,16 @@ pub fn structure_ui(ui: &mut egui::Ui, cols: &Option<Result<Vec<ColumnInfo>>>, t
             let mut st = GridState::default();
             Grid { id: egui::Id::unique(("structure", tab_id)), rs: &rs, editable: false, server_sort: None, overlay: Overlay::default(), generation: 0, row_offset: 0 }.show(ui, &mut st);
         }
+    }
+}
+
+/// A WHERE example in the connection's own SQL dialect.
+fn where_example(d: openvclient_core::sqltext::Dialect) -> &'static str {
+    use openvclient_core::sqltext::Dialect::*;
+    match d {
+        Postgres => "e.g. status = 'active' AND created_at > now() - interval '1 day'",
+        MySql => "e.g. status = 'active' AND created_at > NOW() - INTERVAL 1 DAY",
+        Sqlite => "e.g. status = 'active' AND created_at > datetime('now', '-1 day')",
+        SqlServer => "e.g. status = 'active' AND created_at > DATEADD(day, -1, GETDATE())",
     }
 }

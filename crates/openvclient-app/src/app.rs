@@ -66,6 +66,17 @@ pub enum Cmd {
     FocusTab(u64),
 }
 
+/// Tab-strip requests (context menu, open-tabs list), applied after the
+/// tile tree has been drawn because they need the whole tree.
+#[derive(Clone, Copy)]
+pub enum TabAction {
+    CloseOthers(TileId),
+    CloseRight(TileId),
+    CloseAll(TileId),
+    Focus(TileId),
+    Reopen,
+}
+
 /// A confirmation guarding a destructive action. Production connections
 /// require typing the object name.
 pub struct Confirm {
@@ -141,11 +152,22 @@ pub struct AppCtx {
     pub pending_sql: Option<(u64, Vec<String>)>,
     /// Confirmed destructive resource actions, picked up by the connection's tab.
     pub resource_jobs: HashMap<Uuid, Job<Result<openvclient_core::resource::ActionOutcome>>>,
+    pub tab_actions: Vec<TabAction>,
+    /// Commands that reopen recently closed tabs, newest last (⌘⇧T).
+    pub closed_tabs: Vec<Cmd>,
 }
 
 impl AppCtx {
     pub fn cmd(&mut self, c: Cmd) {
         self.cmds.push(c);
+    }
+
+    /// Keep a closed tab so ⌘⇧T can bring it back (last 20).
+    pub fn remember_closed(&mut self, c: Cmd) {
+        self.closed_tabs.push(c);
+        if self.closed_tabs.len() > 20 {
+            self.closed_tabs.remove(0);
+        }
     }
 
     pub fn profile_name(&self, id: Uuid) -> String {
@@ -224,6 +246,24 @@ pub struct Tab {
 }
 
 impl Tab {
+    /// A command that opens this tab again after it is closed.
+    fn reopen_cmd(&self) -> Option<Cmd> {
+        Some(match &self.kind {
+            TabKind::Home => Cmd::OpenHome,
+            TabKind::Sql(t) => {
+                let (database, text) = t.reopen_parts();
+                Cmd::NewSql { conn: t.conn, database, text }
+            }
+            TabKind::Table(t) => Cmd::OpenTable { conn: t.conn, kind: t.kind.clone(), path: t.path.clone() },
+            TabKind::Monitor(t) => Cmd::OpenMonitor(t.conn),
+            TabKind::Users(t) => Cmd::OpenUsers(t.conn),
+            TabKind::Terminal(t) => Cmd::OpenTerminal(t.conn),
+            TabKind::Redis(t) => Cmd::OpenRedis { conn: t.conn, db: t.db },
+            TabKind::Docker(t) => Cmd::OpenDocker { conn: t.conn, section: t.section },
+            _ => return None,
+        })
+    }
+
     pub fn conn(&self) -> Option<Uuid> {
         match &self.kind {
             TabKind::Home => None,
@@ -376,11 +416,14 @@ impl Behavior<Tab> for Viewer<'_> {
         let title = if cartoon_glyph.is_some() { title.split_once("  ").map(|(_, rest)| rest.to_string()).unwrap_or(title) } else { title };
         let font = egui::FontId::proportional(13.5);
         let text_color = if state.active { t.fg } else { t.muted_fg };
-        let galley = ui.painter().layout_no_wrap(title, font, text_color);
+        // Long titles are cut with "…" so one tab cannot push the rest off-screen.
+        let full_title = title.clone();
+        let galley = crate::views::sidebar::elided(ui, &title, font, text_color, 260.0);
         let (pad, close) = (12.0, 18.0);
         let width = galley.size().x + pad * 2.0 + if state.closable { close + 6.0 } else { 0.0 } + if cartoon_glyph.is_some() { 24.0 } else { 0.0 };
         let (_, rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
         let resp = ui.interact(rect, id, egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let resp = if galley.elided { resp.on_hover_text(&full_title) } else { resp };
         if !state.is_being_dragged {
             let bg = if state.active {
                 ui.visuals().panel_fill
@@ -416,12 +459,22 @@ impl Behavior<Tab> for Viewer<'_> {
                 if hot {
                     ui.painter().rect_filled(crect, 4.0, t.destructive.gamma_multiply(0.85));
                 }
-                let color = if hot { egui::Color32::WHITE } else { t.destructive.gamma_multiply(if state.active || resp.hovered() { 1.0 } else { 0.6 }) };
-                let r = crect.shrink(5.0);
-                let s = egui::Stroke::new(1.6, color);
-                ui.painter().line_segment([r.left_top(), r.right_bottom()], s);
-                ui.painter().line_segment([r.right_top(), r.left_bottom()], s);
+                // Quiet until it matters: muted on the active or hovered tab, hidden
+                // on the others, red only when the pointer is on it.
+                let show = hot || state.active || resp.hovered();
+                if show {
+                    let color = if hot { egui::Color32::WHITE } else { t.muted_fg };
+                    let r = crect.shrink(5.0);
+                    let s = egui::Stroke::new(1.6, color);
+                    ui.painter().line_segment([r.left_top(), r.right_bottom()], s);
+                    ui.painter().line_segment([r.right_top(), r.left_bottom()], s);
+                }
                 if (cresp.clicked() || resp.clicked_by(egui::PointerButton::Middle)) && self.on_tab_close(tiles, tile_id) {
+                    if let Some(Tile::Pane(p)) = tiles.get(tile_id)
+                        && let Some(c) = p.reopen_cmd()
+                    {
+                        self.cx.remember_closed(c);
+                    }
                     tiles.remove(tile_id);
                 }
             }
@@ -429,7 +482,46 @@ impl Behavior<Tab> for Viewer<'_> {
         if resp.clicked() {
             *self.focused = Some(tile_id);
         }
+        let reopen = !self.cx.closed_tabs.is_empty();
+        resp.context_menu(|ui| {
+            let mut act = |a| self.cx.tab_actions.push(a);
+            if ui.button("Close other tabs").clicked() {
+                act(TabAction::CloseOthers(tile_id));
+            }
+            if ui.button("Close tabs to the right").clicked() {
+                act(TabAction::CloseRight(tile_id));
+            }
+            if ui.button("Close all tabs").clicked() {
+                act(TabAction::CloseAll(tile_id));
+            }
+            ui.separator();
+            if ui.add_enabled(reopen, egui::Button::new("Reopen closed tab").shortcut_text(theme::kbd("⌘⇧T"))).clicked() {
+                act(TabAction::Reopen);
+            }
+        });
         self.on_tab_button(tiles, tile_id, resp)
+    }
+
+    /// A list of every tab in this strip, for when they no longer fit.
+    fn top_bar_right_ui(&mut self, tiles: &Tiles<Tab>, ui: &mut egui::Ui, _tile_id: TileId, tabs: &egui_tiles::Tabs, _scroll: &mut f32) {
+        if tabs.children.len() < 2 {
+            return;
+        }
+        ui.add_space(theme::space::XS);
+        ui.menu_button(String::from(ICON_EXPAND_MORE), |ui| {
+            ui.set_min_width(240.0);
+            for child in &tabs.children {
+                if let Some(Tile::Pane(p)) = tiles.get(*child) {
+                    let active = tabs.active == Some(*child);
+                    if ui.selectable_label(active, p.title(self.cx)).clicked() {
+                        self.cx.tab_actions.push(TabAction::Focus(*child));
+                        ui.close();
+                    }
+                }
+            }
+        })
+        .response
+        .on_hover_text("All open tabs");
     }
 
     fn simplification_options(&self) -> SimplificationOptions {
@@ -479,10 +571,17 @@ impl OpenvApp {
             show_shortcuts: false,
             pending_sql: None,
             resource_jobs: HashMap::new(),
+            tab_actions: Vec::new(),
+            closed_tabs: Vec::new(),
             store,
         };
         if let Some(e) = cx.store.load_error.clone() {
-            cx.toasts.error_text("Workspace could not be loaded", e);
+            // A partly decrypted workspace still loaded; say so instead of "could not be loaded".
+            if e.contains("could not be decrypted") {
+                cx.toasts.warn("Some saved items were skipped", e);
+            } else {
+                cx.toasts.error_text("Workspace could not be loaded", e);
+            }
         }
         let tree = Tree::new_tabs(egui::Id::unique("workspace"), vec![Tab { id: 1, kind: TabKind::Home }]);
         Self {
@@ -547,10 +646,50 @@ impl OpenvApp {
     fn close_where(&mut self, pred: impl Fn(&Tab) -> bool) {
         let ids: Vec<TileId> = self.tree.tiles.iter().filter_map(|(id, t)| matches!(t, Tile::Pane(p) if pred(p)).then_some(*id)).collect();
         for id in ids {
+            if let Some(Tile::Pane(p)) = self.tree.tiles.get(id)
+                && let Some(c) = p.reopen_cmd()
+            {
+                self.cx.remember_closed(c);
+            }
             if let Some(Tile::Pane(Tab { kind: TabKind::Sql(t), .. })) = self.tree.tiles.get_mut(id) {
                 t.close(&self.cx.bg);
             }
             self.tree.remove_recursively(id);
+        }
+    }
+
+    /// Apply tab-strip requests queued while drawing the tree.
+    fn apply_tab_actions(&mut self) {
+        for a in std::mem::take(&mut self.cx.tab_actions) {
+            let siblings = |tree: &Tree<Tab>, id: TileId| -> Vec<TileId> {
+                match tree.tiles.parent_of(id).and_then(|p| tree.tiles.get(p)) {
+                    Some(Tile::Container(Container::Tabs(t))) => t.children.clone(),
+                    _ => vec![id],
+                }
+            };
+            let pane_ids = |tree: &Tree<Tab>, ids: Vec<TileId>| -> Vec<u64> { ids.into_iter().filter_map(|i| if let Some(Tile::Pane(p)) = tree.tiles.get(i) { Some(p.id) } else { None }).collect() };
+            match a {
+                TabAction::Focus(id) => self.activate(id),
+                TabAction::Reopen => {
+                    if let Some(c) = self.cx.closed_tabs.pop() {
+                        self.cx.cmd(c);
+                    }
+                }
+                TabAction::CloseOthers(id) | TabAction::CloseRight(id) | TabAction::CloseAll(id) => {
+                    let all = siblings(&self.tree, id);
+                    let pos = all.iter().position(|c| *c == id).unwrap_or(0);
+                    let victims: Vec<TileId> = match a {
+                        TabAction::CloseOthers(_) => all.iter().copied().filter(|c| *c != id).collect(),
+                        TabAction::CloseRight(_) => all[pos + 1..].to_vec(),
+                        _ => all.clone(),
+                    };
+                    let ids = pane_ids(&self.tree, victims);
+                    self.close_where(|t| ids.contains(&t.id));
+                    if matches!(a, TabAction::CloseOthers(_) | TabAction::CloseRight(_)) {
+                        self.activate(id);
+                    }
+                }
+            }
         }
     }
 
@@ -704,6 +843,25 @@ impl OpenvApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
+        let (reopen, nth) = ctx.input_mut(|i| {
+            let reopen = i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::T));
+            let keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
+            let nth = keys.iter().position(|k| i.consume_shortcut(&cmd(*k)));
+            (reopen, nth)
+        });
+        if reopen {
+            self.cx.tab_actions.push(TabAction::Reopen);
+        }
+        if let Some(n) = nth {
+            // ⌘1…⌘8 pick that tab in the focused strip; ⌘9 picks the last one.
+            let strip = self.focused.and_then(|f| self.tree.tiles.parent_of(f)).or_else(|| self.tree.tiles.iter().find_map(|(id, t)| matches!(t, Tile::Container(Container::Tabs(_))).then_some(*id)));
+            if let Some(Tile::Container(Container::Tabs(t))) = strip.and_then(|s| self.tree.tiles.get(s)) {
+                let target = if n == 8 { t.children.last().copied() } else { t.children.get(n).copied() };
+                if let Some(id) = target {
+                    self.cx.tab_actions.push(TabAction::Focus(id));
+                }
+            }
+        }
         let (palette, new_conn, new_sql, close, home, keys) = ctx.input_mut(|i| {
             (
                 i.consume_shortcut(&cmd(Key::K)) || i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::P)),
@@ -1396,6 +1554,7 @@ impl eframe::App for OpenvApp {
             let mut viewer = Viewer { cx: &mut self.cx, focused: &mut self.focused };
             self.tree.ui(&mut viewer, ui);
         });
+        self.apply_tab_actions();
 
         if let Some(mut d) = self.cx.conn_dialog.take()
             && d.show(&ctx, &mut self.cx)

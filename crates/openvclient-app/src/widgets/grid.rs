@@ -227,7 +227,8 @@ impl<'a> Grid<'a> {
                         if deleted {
                             rt = rt.strikethrough();
                         }
-                        let numeric = rs.columns[c].numeric && !is_null;
+                        // Untyped columns (SQLite views, expressions) still right-align numbers.
+                        let numeric = !is_null && (rs.columns[c].numeric || rs.rows[r][c].is_numeric());
                         if numeric {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.label(rt));
                         } else {

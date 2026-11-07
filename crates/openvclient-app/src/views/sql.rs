@@ -102,11 +102,18 @@ impl SqlTab {
         }
     }
 
+    /// Database and text, for reopening a closed tab.
+    pub fn reopen_parts(&self) -> (Option<String>, String) {
+        (self.database.clone(), self.text.clone())
+    }
+
     pub fn title(&self, conn_name: &str) -> String {
         if let Some(f) = &self.file {
             return f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         }
         match &self.database {
+            // Connections are often named after their database; do not say it twice.
+            Some(d) if conn_name == d || conn_name.ends_with(&format!(" · {d}")) || conn_name.ends_with(&format!(" {d}")) => conn_name.to_string(),
             Some(d) => format!("{conn_name} · {d}"),
             None => format!("{conn_name} · console {}", self.n),
         }

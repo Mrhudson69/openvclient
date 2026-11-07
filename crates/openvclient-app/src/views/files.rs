@@ -668,8 +668,14 @@ impl FilesTab {
             .column(Column::initial(150.0).at_least(80.0).clip(true))
             .header(28.0, |mut h| {
                 h.col(|ui| header(ui, "Name", SortBy::Name, &mut sort));
-                h.col(|ui| header(ui, "Size", SortBy::Size, &mut sort));
-                h.col(|ui| header(ui, "Modified", SortBy::Modified, &mut sort));
+                // Size values are right-aligned, so the header is too.
+                h.col(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| header(ui, "Size", SortBy::Size, &mut sort));
+                });
+                h.col(|ui| {
+                    ui.add_space(theme::space::MD);
+                    header(ui, "Modified", SortBy::Modified, &mut sort);
+                });
                 h.col(|ui| header(ui, "Type", SortBy::Kind, &mut sort));
             })
             .body(|body| {
@@ -685,11 +691,23 @@ impl FilesTab {
                     });
                     row.col(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(e.size.map(human).unwrap_or_else(|| "—".into())).color(t.muted_fg));
+                            // Folders have no size; leave the cell empty rather than a dash.
+                            let size = match e.size {
+                                Some(n) => human(n),
+                                None if e.is_dir => String::new(),
+                                None => "—".into(),
+                            };
+                            ui.label(RichText::new(size).color(t.muted_fg));
                         });
                     });
                     row.col(|ui| {
-                        ui.label(RichText::new(e.modified.as_ref().map(when).unwrap_or_else(|| "—".into())).color(t.muted_fg));
+                        ui.add_space(theme::space::MD);
+                        let m = match &e.modified {
+                            Some(m) => when(m),
+                            None if e.is_dir => String::new(),
+                            None => "—".into(),
+                        };
+                        ui.label(RichText::new(m).color(t.muted_fg));
                     });
                     row.col(|ui| {
                         let k = match &e.detail {
