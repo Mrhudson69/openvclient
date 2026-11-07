@@ -131,6 +131,17 @@ fn entries(cx: &AppCtx, tabs: &[(u64, String)], q: &str) -> Vec<Entry> {
         let plain = title.split_once("  ").map(|(_, r)| r.to_string()).unwrap_or_else(|| title.clone());
         add(ICON_TAB, plain, "open tab".into(), Action::Cmd(Cmd::FocusTab(*id)));
     }
+    // Snippets open in a new editor on the selected (or only) SQL connection.
+    let sql_conn = cx.selected_conn.filter(|c| cx.conns.session(*c).is_some_and(|s| s.sql().is_some())).or_else(|| {
+        let ids = cx.conns.connected_ids();
+        let sql: Vec<_> = ids.into_iter().filter(|c| cx.conns.session(*c).is_some_and(|s| s.sql().is_some())).collect();
+        (sql.len() == 1).then(|| sql[0])
+    });
+    if let Some(c) = sql_conn {
+        for sn in &cx.store.ws.snippets {
+            add(ICON_BOOKMARK, sn.name.clone(), format!("snippet · {}", cx.profile_name(c)), Action::Cmd(Cmd::NewSql { conn: c, database: None, text: sn.sql.clone() }));
+        }
+    }
     add(ICON_ADD, "New connection".into(), theme::kbd("command · ⌘N"), Action::Cmd(Cmd::EditConnection(None)));
     add(ICON_DASHBOARD, "Home".into(), theme::kbd("command · ⌘⇧H"), Action::Cmd(Cmd::OpenHome));
     if let Some(c) = cx.selected_conn.filter(|c| cx.conns.is_connected(*c)) {

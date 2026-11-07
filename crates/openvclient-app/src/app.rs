@@ -157,11 +157,28 @@ pub struct AppCtx {
     pub tab_actions: Vec<TabAction>,
     /// Commands that reopen recently closed tabs, newest last (⌘⇧T).
     pub closed_tabs: Vec<Cmd>,
+    /// Tabs from the last session, offered on Home until restored or dismissed.
+    pub restore_offer: Vec<crate::store::SavedTab>,
+    /// Restoring: tabs waiting for their connection to come up.
+    pub restore_pending: Vec<crate::store::SavedTab>,
 }
 
 impl AppCtx {
     pub fn cmd(&mut self, c: Cmd) {
         self.cmds.push(c);
+    }
+
+    /// Connect what the offered tabs need, then open them as connections come up.
+    pub fn restore_session(&mut self) {
+        let tabs = std::mem::take(&mut self.restore_offer);
+        let mut conns: Vec<Uuid> = tabs.iter().map(|t| t.conn()).collect();
+        conns.dedup();
+        for c in conns {
+            if self.conns.session(c).is_none() && !self.conns.is_connecting(c) {
+                self.cmd(Cmd::Connect(c));
+            }
+        }
+        self.restore_pending = tabs;
     }
 
     /// Keep a closed tab so ⌘⇧T can bring it back (last 20).
@@ -249,6 +266,21 @@ pub struct Tab {
 }
 
 impl Tab {
+    /// What to save for reopening after a restart.
+    fn saved(&self) -> Option<crate::store::SavedTab> {
+        use crate::store::SavedTab as S;
+        Some(match &self.kind {
+            TabKind::Sql(t) => {
+                let (database, text) = t.reopen_parts();
+                S::Sql { conn: t.conn, database, text }
+            }
+            TabKind::Table(t) => S::Table { conn: t.conn, kind: t.kind, path: t.path.clone() },
+            TabKind::Monitor(t) => S::Monitor { conn: t.conn },
+            TabKind::Redis(t) => S::Redis { conn: t.conn, db: t.db },
+            _ => return None,
+        })
+    }
+
     /// A command that opens this tab again after it is closed.
     fn reopen_cmd(&self) -> Option<Cmd> {
         Some(match &self.kind {
@@ -579,8 +611,13 @@ impl OpenvApp {
             resource_jobs: HashMap::new(),
             tab_actions: Vec::new(),
             closed_tabs: Vec::new(),
+            restore_offer: Vec::new(),
+            restore_pending: Vec::new(),
             store,
         };
+        // Offer last session's tabs whose connection still exists.
+        let saved = std::mem::take(&mut cx.store.ws.session);
+        cx.restore_offer = saved.into_iter().filter(|t| cx.store.profile(t.conn()).is_some()).collect();
         if let Some(e) = cx.store.load_error.clone() {
             // A partly decrypted workspace still loaded; say so instead of "could not be loaded".
             if e.contains("could not be decrypted") {
@@ -701,6 +738,17 @@ impl OpenvApp {
     }
 
     fn run_commands(&mut self) {
+        // Restored tabs open once their connection is ready; failed ones are dropped.
+        if !self.cx.restore_pending.is_empty() {
+            let pending = std::mem::take(&mut self.cx.restore_pending);
+            for t in pending {
+                match self.cx.conns.state(t.conn()) {
+                    Some(ConnState::Connected(_)) => self.cx.cmd(t.into_cmd()),
+                    Some(ConnState::Failed(_)) => {}
+                    _ => self.cx.restore_pending.push(t),
+                }
+            }
+        }
         let cmds = std::mem::take(&mut self.cx.cmds);
         for c in cmds {
             match c {
@@ -1692,6 +1740,13 @@ impl eframe::App for OpenvApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Remember open tabs (in strip order) for "Pick up where you left off".
+        let mut saved: Vec<crate::store::SavedTab> = self.tree.tiles.iter().filter_map(|(_, t)| if let Tile::Pane(p) = t { p.saved() } else { None }).collect();
+        // Not yet restored? Keep the earlier offer rather than losing it.
+        if saved.is_empty() {
+            saved = std::mem::take(&mut self.cx.restore_offer);
+        }
+        self.cx.store.ws.session = saved;
         if let Err(e) = self.cx.store.save() {
             tracing::error!("saving workspace on exit failed: {e}");
         }

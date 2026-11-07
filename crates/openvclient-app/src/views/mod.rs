@@ -122,6 +122,7 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("SQL editor", "⌘E", "Explain statement"),
     ("SQL editor", "⌘.", "Cancel running query"),
     ("SQL editor", "⌘S", "Save SQL to file"),
+    ("SQL editor", "⌘⇧F", "Format SQL (or the selection)"),
     ("SQL editor", "⌃Space", "Autocomplete"),
 ];
 

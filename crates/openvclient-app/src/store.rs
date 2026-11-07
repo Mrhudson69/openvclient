@@ -123,6 +123,12 @@ pub struct Workspace {
     /// Recently run SQL per connection, newest first.
     #[serde(default)]
     pub history: Vec<HistoryEntry>,
+    /// Saved SQL snippets, shared by every connection.
+    #[serde(default)]
+    pub snippets: Vec<Snippet>,
+    /// Tabs open when the app last closed, reopened at start-up.
+    #[serde(default)]
+    pub session: Vec<SavedTab>,
     /// Connections pinned to Home, in the order they were starred.
     #[serde(default)]
     pub favorites: Vec<Uuid>,
@@ -134,6 +140,40 @@ pub struct HistoryEntry {
     pub sql: String,
     pub at: String,
     pub ok: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Snippet {
+    pub name: String,
+    pub sql: String,
+}
+
+/// A tab that can be reopened after a restart.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "tab", rename_all = "snake_case")]
+pub enum SavedTab {
+    Sql { conn: Uuid, database: Option<String>, text: String },
+    Table { conn: Uuid, kind: openvclient_core::sql::ObjectKind, path: openvclient_core::sql::ObjPath },
+    Monitor { conn: Uuid },
+    Redis { conn: Uuid, db: u32 },
+}
+
+impl SavedTab {
+    pub fn conn(&self) -> Uuid {
+        match self {
+            SavedTab::Sql { conn, .. } | SavedTab::Table { conn, .. } | SavedTab::Monitor { conn } | SavedTab::Redis { conn, .. } => *conn,
+        }
+    }
+
+    pub fn into_cmd(self) -> crate::app::Cmd {
+        use crate::app::Cmd;
+        match self {
+            SavedTab::Sql { conn, database, text } => Cmd::NewSql { conn, database, text },
+            SavedTab::Table { conn, kind, path } => Cmd::OpenTable { conn, kind, path },
+            SavedTab::Monitor { conn } => Cmd::OpenMonitor(conn),
+            SavedTab::Redis { conn, db } => Cmd::OpenRedis { conn, db },
+        }
+    }
 }
 
 pub struct Store {

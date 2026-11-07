@@ -20,6 +20,31 @@ pub fn ui(ui: &mut egui::Ui, cx: &mut AppCtx) {
         });
         ui.add_space(theme::space::XL);
 
+        // Last session's tabs, opened only when asked (they may need to connect).
+        if !cx.restore_offer.is_empty() {
+            let n = cx.restore_offer.len();
+            let mut names: Vec<String> = cx.restore_offer.iter().map(|t| cx.profile_name(t.conn())).collect();
+            names.dedup();
+            card(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(String::from(ICON_HISTORY)).size(20.0).color(t.info));
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(format!("Pick up where you left off: {n} tab{}", if n == 1 { "" } else { "s" })).strong());
+                        ui.label(RichText::new(format!("Connects to {}", names.join(", "))).small().color(t.muted_fg));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Dismiss").clicked() {
+                            cx.restore_offer.clear();
+                        }
+                        if theme::primary_button(ui, ico(ICON_RESTORE, "Restore")).clicked() {
+                            cx.restore_session();
+                        }
+                    });
+                });
+            });
+            ui.add_space(theme::space::LG);
+        }
+
         // Connection overview cards; favourites are pinned in their own section first.
         let mut profiles = cx.store.ws.profiles.clone();
         profiles.sort_by(|a, b| b.last_connected_at.cmp(&a.last_connected_at).then(a.name.cmp(&b.name)));
